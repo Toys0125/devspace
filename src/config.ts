@@ -4,6 +4,7 @@ import { expandHomePath } from "./roots.js";
 import type { LoggingConfig, LogFormat, LogLevel } from "./logger.js";
 import type { OAuthConfig } from "./oauth-provider.js";
 import { devspaceAgentsDir, devspaceSkillsDir, loadDevspaceFiles } from "./user-config.js";
+import { defaultUnityEditorRoots, type UnityRunnerConfig } from "./unity-validation.js";
 
 export type ToolMode = "minimal" | "full" | "codex";
 export type WidgetMode = "off" | "changes" | "full";
@@ -30,6 +31,7 @@ export interface ServerConfig {
   devspaceAgentsDir: string;
   subagents: boolean;
   agentDir: string;
+  unity: UnityRunnerConfig;
   logging: LoggingConfig;
 }
 
@@ -222,6 +224,32 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     new URL(publicBaseUrl).hostname,
     ...(files.config.allowedHosts ?? []),
   ];
+  const stateDir = resolve(expandHomePath(env.DEVSPACE_STATE_DIR ?? files.config.stateDir ?? defaultStateDir()));
+  const unityStateDir = resolve(
+    expandHomePath(env.DEVSPACE_UNITY_STATE_DIR ?? files.config.unity?.stateDir ?? join(stateDir, "unity-runner")),
+  );
+  const unityEditorRoots = parsePathList(env.DEVSPACE_UNITY_EDITOR_ROOTS);
+  const persistedUnityEditorRoots = files.config.unity?.editorRoots ?? [];
+  const selectedUnityEditorRoots = unityEditorRoots.length > 0
+    ? unityEditorRoots
+    : persistedUnityEditorRoots.length > 0
+      ? persistedUnityEditorRoots
+      : defaultUnityEditorRoots();
+  const unityAllowedRepositories = parsePathList(env.DEVSPACE_UNITY_ALLOWED_REPOSITORIES);
+  const selectedUnityAllowedRepositories = unityAllowedRepositories.length > 0
+    ? unityAllowedRepositories
+    : files.config.unity?.allowedRepositoryPrefixes ?? [];
+  const unityEnabled = env.DEVSPACE_UNITY_RUNNER === undefined
+    ? files.config.unity?.enabled === true
+    : parseBoolean(env.DEVSPACE_UNITY_RUNNER);
+  const unityAllowAnyRepository = env.DEVSPACE_UNITY_ALLOW_ANY_REPOSITORY === undefined
+    ? files.config.unity?.allowAnyRepository === true
+    : parseBoolean(env.DEVSPACE_UNITY_ALLOW_ANY_REPOSITORY);
+  if (unityEnabled && selectedUnityAllowedRepositories.length === 0 && !unityAllowAnyRepository) {
+    throw new Error(
+      "DEVSPACE_UNITY_RUNNER requires DEVSPACE_UNITY_ALLOWED_REPOSITORIES (or unity.allowedRepositoryPrefixes) to restrict executable Unity projects. Set DEVSPACE_UNITY_ALLOW_ANY_REPOSITORY=1 only for an intentionally unrestricted development worker.",
+    );
+  }
 
   return {
     host,
@@ -232,7 +260,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     publicBaseUrl,
     toolMode: parseToolMode(env),
     widgets: parseWidgetMode(env.DEVSPACE_WIDGETS),
-    stateDir: resolve(expandHomePath(env.DEVSPACE_STATE_DIR ?? files.config.stateDir ?? defaultStateDir())),
+    stateDir,
     worktreeRoot: resolve(expandHomePath(env.DEVSPACE_WORKTREE_ROOT ?? files.config.worktreeRoot ?? defaultWorktreeRoot())),
     artifactsEnabled:
       env.DEVSPACE_ARTIFACTS === undefined
@@ -252,6 +280,24 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
         ? files.config.subagents === true
         : parseBoolean(env.DEVSPACE_SUBAGENTS),
     agentDir: resolve(expandHomePath(env.DEVSPACE_AGENT_DIR ?? files.config.agentDir ?? defaultAgentDir())),
+    unity: {
+      enabled: unityEnabled,
+      stateDir: unityStateDir,
+      editorRoots: selectedUnityEditorRoots.map((root) => resolve(expandHomePath(root))),
+      maxConcurrentJobs: parsePositiveInteger(
+        env.DEVSPACE_UNITY_MAX_CONCURRENT_JOBS ?? numberConfigValue(files.config.unity?.maxConcurrentJobs),
+        1,
+        "DEVSPACE_UNITY_MAX_CONCURRENT_JOBS",
+        32,
+      ),
+      jobTimeoutSeconds: parsePositiveInteger(
+        env.DEVSPACE_UNITY_JOB_TIMEOUT_SECONDS ?? numberConfigValue(files.config.unity?.jobTimeoutSeconds),
+        30 * 60,
+        "DEVSPACE_UNITY_JOB_TIMEOUT_SECONDS",
+        24 * 60 * 60,
+      ),
+      allowedRepositoryPrefixes: selectedUnityAllowedRepositories,
+    },
     logging: parseLoggingConfig(env),
   };
 }

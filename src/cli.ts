@@ -157,6 +157,7 @@ async function runInit({ force }: { force: boolean }): Promise<void> {
     }));
 
     const config: DevspaceUserConfig = {
+      ...files.config,
       host: files.config.host ?? "127.0.0.1",
       port,
       allowedRoots,
@@ -169,7 +170,9 @@ async function runInit({ force }: { force: boolean }): Promise<void> {
 
     const configPath = writeDevspaceConfig(config);
     const authPath = writeDevspaceAuth(auth);
-    const seededSkillPaths = config.subagents ? ensureDevspaceDefaultSkills() : [];
+    const seededSkillPaths = ensureDevspaceDefaultSkills(process.env, {
+      subagents: config.subagents === true,
+    });
 
     const lines = [
       `Config: ${configPath}`,
@@ -213,6 +216,9 @@ async function serve(): Promise<void> {
 
   const { createServer } = await import("./server.js");
   const config = loadConfig();
+  if (config.skillsEnabled) {
+    ensureDevspaceDefaultSkills(process.env, { subagents: config.subagents });
+  }
   const { app, close, localAgentProviders } = createServer(config);
   const httpServer = app.listen(config.port, config.host, () => {
     console.log(`devspace listening on http://${config.host}:${config.port}/mcp`);
@@ -224,6 +230,10 @@ async function serve(): Promise<void> {
     }
     console.log("auth: Owner password approval required");
     console.log(`logging: ${config.logging.level} ${config.logging.format}`);
+    if (config.unity.enabled) {
+      console.log(`unity validation runner: enabled (${config.unity.maxConcurrentJobs} concurrent job${config.unity.maxConcurrentJobs === 1 ? "" : "s"})`);
+      console.log(`unity editor roots: ${config.unity.editorRoots.join(", ")}`);
+    }
     if (config.subagents) {
       console.log(`subagent providers: ${formatLocalAgentProviderAvailabilitySummary(localAgentProviders)}`);
     }

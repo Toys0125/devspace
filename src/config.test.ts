@@ -28,6 +28,45 @@ assert.equal(loadConfig(baseEnv).devspaceAgentsDir, join(emptyConfigDir, "agents
 assert.equal(loadConfig(baseEnv).subagents, false);
 assert.equal(loadConfig(baseEnv).artifactsEnabled, false);
 assert.equal(loadConfig(baseEnv).artifactMaxFileBytes, 100 * 1024 * 1024);
+assert.equal(loadConfig(baseEnv).unity.enabled, false);
+assert.equal(loadConfig(baseEnv).unity.maxConcurrentJobs, 1);
+assert.equal(loadConfig(baseEnv).unity.jobTimeoutSeconds, 30 * 60);
+assert.throws(
+  () => loadConfig({ ...baseEnv, DEVSPACE_UNITY_RUNNER: "1" }),
+  /DEVSPACE_UNITY_RUNNER requires DEVSPACE_UNITY_ALLOWED_REPOSITORIES/,
+);
+assert.equal(
+  loadConfig({
+    ...baseEnv,
+    DEVSPACE_UNITY_RUNNER: "1",
+    DEVSPACE_UNITY_ALLOWED_REPOSITORIES: "https://github.com/BasisVR/",
+  }).unity.enabled,
+  true,
+);
+assert.equal(
+  loadConfig({
+    ...baseEnv,
+    DEVSPACE_UNITY_RUNNER: "1",
+    DEVSPACE_UNITY_ALLOW_ANY_REPOSITORY: "1",
+  }).unity.enabled,
+  true,
+);
+assert.equal(
+  loadConfig({ ...baseEnv, DEVSPACE_UNITY_MAX_CONCURRENT_JOBS: "3" }).unity.maxConcurrentJobs,
+  3,
+);
+assert.equal(
+  loadConfig({ ...baseEnv, DEVSPACE_UNITY_JOB_TIMEOUT_SECONDS: "45" }).unity.jobTimeoutSeconds,
+  45,
+);
+assert.deepEqual(
+  loadConfig({ ...baseEnv, DEVSPACE_UNITY_EDITOR_ROOTS: "/unity/a,/unity/b" }).unity.editorRoots,
+  ["/unity/a", "/unity/b"],
+);
+assert.deepEqual(
+  loadConfig({ ...baseEnv, DEVSPACE_UNITY_ALLOWED_REPOSITORIES: "https://github.com/BasisVR/,git@github.com:Toys0125/" }).unity.allowedRepositoryPrefixes,
+  ["https://github.com/BasisVR/", "git@github.com:Toys0125/"],
+);
 assert.equal(loadConfig({ ...baseEnv, DEVSPACE_ARTIFACTS: "1" }).artifactsEnabled, true);
 assert.equal(
   loadConfig({ ...baseEnv, DEVSPACE_ARTIFACT_MAX_FILE_BYTES: "123" }).artifactMaxFileBytes,
@@ -46,10 +85,28 @@ assert.equal(resolveSubagentsFlag({}, { DEVSPACE_SUBAGENTS: "1" }), true);
 
 const seededConfigDir = mkdtempSync(join(tmpdir(), "devspace-seeded-skills-test-"));
 const seededSkillPaths = ensureDevspaceDefaultSkills({ DEVSPACE_CONFIG_DIR: seededConfigDir });
-assert.deepEqual(seededSkillPaths, [join(seededConfigDir, "skills", "subagent-delegation", "SKILL.md")]);
+assert.deepEqual(seededSkillPaths, [
+  join(seededConfigDir, "skills", "subagent-delegation", "SKILL.md"),
+  join(seededConfigDir, "skills", "unity-remote-validation", "SKILL.md"),
+]);
 assert.equal(existsSync(seededSkillPaths[0]), true);
 assert.match(readFileSync(seededSkillPaths[0], "utf8"), /name: subagent-delegation/);
+assert.equal(existsSync(seededSkillPaths[1]), true);
+assert.match(readFileSync(seededSkillPaths[1], "utf8"), /name: unity-remote-validation/);
 assert.deepEqual(ensureDevspaceDefaultSkills({ DEVSPACE_CONFIG_DIR: seededConfigDir }), []);
+
+const unityOnlySkillsDir = mkdtempSync(join(tmpdir(), "devspace-unity-only-skills-test-"));
+assert.deepEqual(
+  ensureDevspaceDefaultSkills(
+    { DEVSPACE_CONFIG_DIR: unityOnlySkillsDir },
+    { subagents: false },
+  ),
+  [join(unityOnlySkillsDir, "skills", "unity-remote-validation", "SKILL.md")],
+);
+assert.equal(
+  existsSync(join(unityOnlySkillsDir, "skills", "subagent-delegation", "SKILL.md")),
+  false,
+);
 
 assert.throws(
   () => loadConfig({ ...baseEnv, DEVSPACE_WIDGETS: "invalid" }),
@@ -149,6 +206,14 @@ assert.throws(
   () => loadConfig({ ...baseEnv, DEVSPACE_ARTIFACT_MAX_FILE_BYTES: "0" }),
   /Invalid DEVSPACE_ARTIFACT_MAX_FILE_BYTES: 0/,
 );
+assert.throws(
+  () => loadConfig({ ...baseEnv, DEVSPACE_UNITY_MAX_CONCURRENT_JOBS: "0" }),
+  /Invalid DEVSPACE_UNITY_MAX_CONCURRENT_JOBS: 0/,
+);
+assert.throws(
+  () => loadConfig({ ...baseEnv, DEVSPACE_UNITY_JOB_TIMEOUT_SECONDS: "0" }),
+  /Invalid DEVSPACE_UNITY_JOB_TIMEOUT_SECONDS: 0/,
+);
 
 assert.equal(loadConfig(baseEnv).publicBaseUrl, "http://127.0.0.1:7676");
 assert.deepEqual(loadConfig(baseEnv).allowedHosts, ["localhost", "127.0.0.1", "::1"]);
@@ -176,6 +241,9 @@ writeFileSync(
     subagents: true,
     artifactsEnabled: true,
     artifactMaxFileBytes: 321,
+    unity: {
+      editorRoots: [],
+    },
   }),
 );
 writeFileSync(
@@ -192,6 +260,7 @@ assert.equal(fileConfig.publicBaseUrl, "https://devspace.example.com");
 assert.equal(fileConfig.subagents, true);
 assert.equal(fileConfig.artifactsEnabled, true);
 assert.equal(fileConfig.artifactMaxFileBytes, 321);
+assert.ok(fileConfig.unity.editorRoots.length > 0);
 assert.deepEqual(fileConfig.allowedHosts, [
   "localhost",
   "127.0.0.1",

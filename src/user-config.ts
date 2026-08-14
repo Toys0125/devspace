@@ -21,6 +21,15 @@ export interface DevspaceUserConfig {
   artifactMaxFileBytes?: number;
   agentDir?: string;
   subagents?: boolean;
+  unity?: {
+    enabled?: boolean;
+    stateDir?: string;
+    editorRoots?: string[];
+    maxConcurrentJobs?: number;
+    jobTimeoutSeconds?: number;
+    allowedRepositoryPrefixes?: string[];
+    allowAnyRepository?: boolean;
+  };
 }
 
 export interface DevspaceAuthConfig {
@@ -99,14 +108,35 @@ export function generateOwnerToken(): string {
   return randomBytes(32).toString("base64url");
 }
 
-export function ensureDevspaceDefaultSkills(env: NodeJS.ProcessEnv = process.env): string[] {
-  const targetPath = join(devspaceSkillsDir(env), "subagent-delegation", "SKILL.md");
-  if (existsSync(targetPath)) return [];
+export function ensureDevspaceDefaultSkills(
+  env: NodeJS.ProcessEnv = process.env,
+  options: { subagents?: boolean } = { subagents: true },
+): string[] {
+  const defaults = [
+    ...(options.subagents === false
+      ? []
+      : [
+          {
+            name: "subagent-delegation",
+            sourcePath: new URL("../skills/subagent-delegation/SKILL.md", import.meta.url),
+          },
+        ]),
+    {
+      name: "unity-remote-validation",
+      sourcePath: new URL("../skills/unity-remote-validation/SKILL.md", import.meta.url),
+    },
+  ];
+  const created: string[] = [];
 
-  const sourcePath = new URL("../skills/subagent-delegation/SKILL.md", import.meta.url);
-  mkdirSync(dirname(targetPath), { recursive: true });
-  writeFileSync(targetPath, readFileSync(sourcePath, "utf8"), { mode: 0o644 });
-  return [targetPath];
+  for (const skill of defaults) {
+    const targetPath = join(devspaceSkillsDir(env), skill.name, "SKILL.md");
+    if (existsSync(targetPath)) continue;
+    mkdirSync(dirname(targetPath), { recursive: true });
+    writeFileSync(targetPath, readFileSync(skill.sourcePath, "utf8"), { mode: 0o644 });
+    created.push(targetPath);
+  }
+
+  return created;
 }
 
 export function resolveSubagentsFlag(

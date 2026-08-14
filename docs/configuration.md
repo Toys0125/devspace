@@ -136,6 +136,7 @@ DevSpace discovers standard Agent Skills from:
 
 It also keeps compatibility with:
 
+- the bundled `unity-remote-validation` skill, installed automatically unless `~/.devspace/skills/unity-remote-validation/SKILL.md` already exists
 - the bundled `subagent-delegation` skill when `DEVSPACE_SUBAGENTS=1`, unless `~/.devspace/skills/subagent-delegation/SKILL.md` exists
 - `DEVSPACE_AGENT_DIR/skills`, defaulting to `~/.codex/skills`
 - additional paths from `DEVSPACE_SKILL_PATHS`
@@ -165,6 +166,29 @@ Example:
 DEVSPACE_SKILL_PATHS="$HOME/.claude/skills,$HOME/company/skills" \
 npx @waishnav/devspace serve
 ```
+
+## Unity Validation Worker
+
+Every DevSpace instance exposes source-side helpers for immutable Unity handoff:
+`prepare_unity_validation` and `check_unity_validation_receipt`.
+
+Enable the execution worker only on the DevSpace instance that has Unity editors
+installed:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `DEVSPACE_UNITY_RUNNER` | `0` | Expose Unity submit/status/log/cancel/health tools. |
+| `DEVSPACE_UNITY_EDITOR_ROOTS` | `~/Unity/Hub/Editor,/opt/unity/editors` | Comma-separated roots containing versioned Unity editor installs. |
+| `DEVSPACE_UNITY_STATE_DIR` | `<DEVSPACE_STATE_DIR>/unity-runner` | Mirrors, isolated job checkouts, logs, and receipts. |
+| `DEVSPACE_UNITY_MAX_CONCURRENT_JOBS` | `1` | Maximum simultaneous Unity jobs (1-32). |
+| `DEVSPACE_UNITY_JOB_TIMEOUT_SECONDS` | `1800` | Per Git/Unity command timeout. |
+| `DEVSPACE_UNITY_ALLOWED_REPOSITORIES` | empty | Comma-separated repository URL prefix allowlist. Required when the Unity runner is enabled. |
+| `DEVSPACE_UNITY_ALLOW_ANY_REPOSITORY` | `0` | Unsafe development-only opt-in to run repositories without an allowlist. |
+
+The same settings may be persisted as the nested `unity` object in
+`~/.devspace/config.json`. See [Remote Unity validation](unity-remote-validation.md)
+for the repository profile schema, agent workflow, failure categories, and
+container deployment guidance.
 
 ## Logging
 

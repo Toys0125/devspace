@@ -61,6 +61,9 @@ import {
   getLocalAgentProviderAvailabilitySnapshot,
   type LocalAgentProviderAvailability,
 } from "./local-agent-availability.js";
+import { UnityValidationRunner } from "./unity-validation.js";
+import { registerUnityValidationTools } from "./unity-validation-tools.js";
+import { registerUnityValidationSourceTools } from "./unity-validation-source-tools.js";
 
 type Transport = StreamableHTTPServerTransport;
 // MCP clients can reconnect without closing the previous transport. Bound stale
@@ -190,6 +193,16 @@ interface ToolLogFields {
   error?: string;
 }
 
+export function shellToolDescription(toolMode: ServerConfig["toolMode"]): string {
+  return toolMode !== "full"
+    ? `Run a shell command inside an open workspace. In minimal tool mode, ${toolNames.grep}, ${toolNames.glob}, and ${toolNames.ls} are disabled; use command-line tools such as grep, rg, find, ls, and tree for read-only inspection. Allowed purposes include tests, builds, package scripts, search, file discovery, directory inspection, and shell-side tooling. Git read commands such as git status, git diff, git log, and git show are allowed; Git write commands such as git add, git commit, git push, git fetch, and git pull are also allowed through this tool. Do not use ${toolNames.shell} to directly create or modify project source files; use ${toolNames.edit} for targeted source changes and ${toolNames.write} for new project files or full rewrites. Do not use shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or generated scripts to write project source files. Prefer ${toolNames.read} for direct file reads. Call open_workspace first and pass workspaceId. This is powerful local execution and should only be exposed behind strong authentication.`
+    : `Run a shell command inside an open workspace. Allowed purposes include tests, builds, package scripts, search, file discovery, directory inspection, shell-side tooling, and Git operations. Git read commands such as git status, git diff, git log, and git show are allowed; Git write commands such as git add, git commit, git push, git fetch, and git pull are also allowed through this tool. Do not use ${toolNames.shell} to directly create or modify project source files; use ${toolNames.edit} for targeted source changes and ${toolNames.write} for new project files or full rewrites. Do not use shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or generated scripts to write project source files. Prefer ${toolNames.read}, ${toolNames.grep}, ${toolNames.glob}, and ${toolNames.ls} for file inspection. Call open_workspace first and pass workspaceId. This is powerful local execution and should only be exposed behind strong authentication.`;
+}
+
+export function shellCommandDescription(): string {
+  return `Shell command to run. Allowed commands include tests, builds, package scripts, search, file discovery, directory inspection, shell-side tooling, and Git operations, including Git writes such as git add, git commit, git push, git fetch, and git pull. Do not use this command to directly create or modify project source files; use ${toolNames.edit} or ${toolNames.write} for source-file changes.`;
+}
+
 function serverInstructions(config: ServerConfig): string {
   const artifactInstruction = config.artifactsEnabled && isArtifactDownloadSupportedPlatform()
     ? " When the user supplies or generates a file that is not present on the DevSpace host, use download_artifact with its native file value, the existing workspace ID, and a suitable relative destination path chosen from the user's request and project structure. The tool refuses to overwrite an existing destination and returns the normalized workspace-relative path. Use normal workspace tools when explicit inspection, replacement, movement, renaming, or deletion is needed. Do not recreate binary files with write/edit calls or place signed URLs, native file objects, base64 content, or invented host paths in shell commands or logs."
@@ -198,9 +211,12 @@ function serverInstructions(config: ServerConfig): string {
     config.widgets === "changes"
       ? " If the turn successfully modifies files by creating, editing, overwriting, deleting, moving, or applying patches, call show_changes exactly once for that workspace after the final related file change and before your final response so the user can inspect the aggregate diff for that turn. Do not call it after every individual file change; do not skip it because individual file-change tools already returned diffs."
       : "";
+  const unityInstruction = config.unity.enabled
+    ? " This DevSpace instance is also a Unity validation worker. Prefer submit_unity_validation/get_unity_validation for Unity compilation, tests, builds, and project validation instead of operating on a shared live checkout. Submit only immutable Git commit SHAs; a validation receipt applies only to the exact validated SHA."
+    : "";
 
   if (config.toolMode === "codex") {
-    return `Use DevSpace for coding work. Call ${toolNames.openWorkspace} once for each project folder or isolated worktree, then keep using its workspaceId. During continued work in the same project or worktree, do not call ${toolNames.openWorkspace} again. Open another workspace only when changing projects, switching checkout/worktree mode, creating another isolated worktree, or when the current workspaceId is rejected. Use ${toolNames.read} for direct file reads, apply_patch for all file modifications, exec_command for inspection, tests, builds, and other commands, and write_stdin to poll or interact with running processes. Follow instructions returned by ${toolNames.openWorkspace}; read applicable instruction and skill files before working in their scope.${artifactInstruction}${showChangesInstruction}`;
+    return `Use DevSpace for coding work. Call ${toolNames.openWorkspace} once for each project folder or isolated worktree, then keep using its workspaceId. During continued work in the same project or worktree, do not call ${toolNames.openWorkspace} again. Open another workspace only when changing projects, switching checkout/worktree mode, creating another isolated worktree, or when the current workspaceId is rejected. Use ${toolNames.read} for direct file reads, apply_patch for all file modifications, exec_command for inspection, tests, builds, and other commands, and write_stdin to poll or interact with running processes. Follow instructions returned by ${toolNames.openWorkspace}; read applicable instruction and skill files before working in their scope.${artifactInstruction}${showChangesInstruction}${unityInstruction}`;
   }
 
   const inspection = config.toolMode !== "full"
@@ -213,7 +229,7 @@ function serverInstructions(config: ServerConfig): string {
 
   const agentsMd = `Follow instructions returned by ${toolNames.openWorkspace}. Before working under a path listed in availableAgentsFiles, use ${toolNames.read} to inspect that instruction file and follow it. `;
 
-  return `Use DevSpace for coding work. Call ${toolNames.openWorkspace} once for each project folder or isolated worktree, then keep using its workspaceId. During continued work in the same project or worktree, do not call ${toolNames.openWorkspace} again. Open another workspace only when changing projects, switching checkout/worktree mode, creating another isolated worktree, or when the current workspaceId is rejected. ${agentsMd}${skills}${inspection}Prefer ${toolNames.edit} for targeted modifications, ${toolNames.write} only for new files or complete rewrites, and ${toolNames.shell} for tests, builds, git inspection, package scripts, and commands that are better executed by the shell. Do not create or modify files with ${toolNames.shell}; avoid shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or any command whose purpose is to write project files.${artifactInstruction}${showChangesInstruction}`;
+  return `Use DevSpace for coding work. Call ${toolNames.openWorkspace} once for each project folder or isolated worktree, then keep using its workspaceId. During continued work in the same project or worktree, do not call ${toolNames.openWorkspace} again. Open another workspace only when changing projects, switching checkout/worktree mode, creating another isolated worktree, or when the current workspaceId is rejected. ${agentsMd}${skills}${inspection}Prefer ${toolNames.edit} for targeted project-source modifications and ${toolNames.write} only for new project files or complete rewrites. Use ${toolNames.shell} for tests, builds, package scripts, shell-side tooling, and Git operations; Git read and write commands including git status, git diff, git add, git commit, git push, git fetch, and git pull are allowed. Do not use ${toolNames.shell} to directly create or modify project source files; avoid shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or generated scripts whose purpose is to write project source files.${artifactInstruction}${showChangesInstruction}${unityInstruction}`;
 }
 
 function formatVisibleAgent(agent: {
@@ -704,6 +720,7 @@ export function createMcpServer(
   processSessions: ProcessSessionManager,
   localAgentProviders: LocalAgentProviderAvailability[],
   incomingArtifactAdapters: readonly IncomingArtifactAdapter[],
+  unityRunner?: UnityValidationRunner,
 ): McpServer {
   const server = new McpServer(
     {
@@ -1560,18 +1577,14 @@ export function createMcpServer(
     toolNames.shell,
     {
       title: "Bash",
-      description: config.toolMode !== "full"
-        ? `Run a shell command in a workspace. Use only for tests, builds, git inspection, package scripts, search, file discovery, and directory inspection. In minimal tool mode, ${toolNames.grep}, ${toolNames.glob}, and ${toolNames.ls} are disabled; use command-line tools such as grep, rg, find, ls, and tree for those read-only inspection actions. Do not use ${toolNames.shell} to create or modify files. Do not use shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or generated scripts to write project files; use ${toolNames.edit} for targeted changes and ${toolNames.write} for new files or full rewrites. Prefer ${toolNames.read} for direct file reads. This is powerful execution and should only be exposed behind strong authentication.`
-        : `Run a shell command in a workspace. Use only for tests, builds, git inspection, package scripts, and commands that are better executed by the shell. Do not use ${toolNames.shell} to create or modify files. Do not use shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or generated scripts to write project files; use ${toolNames.edit} for targeted changes and ${toolNames.write} for new files or full rewrites. Prefer ${toolNames.read}, ${toolNames.grep}, ${toolNames.glob}, and ${toolNames.ls} for file inspection. This is powerful execution and should only be exposed behind strong authentication.`,
+      description: shellToolDescription(config.toolMode),
       inputSchema: {
         workspaceId: z
           .string()
           .describe(workspaceIdDescription),
         command: z
           .string()
-          .describe(
-            `Shell command to run. Must not create or modify project files; use ${toolNames.edit} or ${toolNames.write} for file changes.`,
-          ),
+          .describe(shellCommandDescription()),
         workingDirectory: z
           .string()
           .optional()
@@ -1658,6 +1671,12 @@ export function createMcpServer(
     });
   }
 
+  registerUnityValidationSourceTools(server, workspaces);
+
+  if (unityRunner) {
+    registerUnityValidationTools(server, unityRunner);
+  }
+
   return server;
 }
 
@@ -1691,6 +1710,7 @@ export function createServer(
   const workspaces = new WorkspaceRegistry(config, workspaceStore);
   const reviewCheckpoints = createReviewCheckpointManager();
   const processSessions = new ProcessSessionManager();
+  const unityRunner = config.unity.enabled ? new UnityValidationRunner(config.unity) : undefined;
   const localAgentProviders = config.subagents
     ? getLocalAgentProviderAvailabilitySnapshot()
     : [];
@@ -1855,6 +1875,7 @@ export function createServer(
           processSessions,
           localAgentProviders,
           incomingArtifactAdapters,
+          unityRunner,
         );
         await server.connect(transport);
       } else {
@@ -1885,6 +1906,7 @@ export function createServer(
         const results = await transports.closeAll();
         logSessionCloseResults("server_shutdown", results);
         processSessions.shutdown();
+        await unityRunner?.shutdown();
         oauthProvider.close();
         workspaceStore.close?.();
       })();
@@ -1919,6 +1941,10 @@ if (await isMainModule()) {
         ? "enabled"
         : `unsupported on ${process.platform}`;
     console.log(`native artifact download: ${artifactDownloadStatus}`);
+    if (config.unity.enabled) {
+      console.log(`unity validation runner: enabled (${config.unity.maxConcurrentJobs} concurrent job${config.unity.maxConcurrentJobs === 1 ? "" : "s"})`);
+      console.log(`unity editor roots: ${config.unity.editorRoots.join(", ")}`);
+    }
     if (config.subagents) {
       console.log(`subagent providers: ${formatLocalAgentProviderAvailabilitySummary(localAgentProviders)}`);
     }
