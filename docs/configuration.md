@@ -202,6 +202,8 @@ container deployment guidance.
 | `DEVSPACE_LOG_SHELL_COMMANDS` | `0` |
 | `DEVSPACE_TRUST_PROXY` | `0` |
 
+`DEVSPACE_TRUST_PROXY` accepts `0`/false, a positive numeric proxy-hop count, or the legacy boolean true values. For reverse proxies, prefer the smallest correct hop count (for example `1` when exactly one trusted proxy connects directly to DevSpace). Avoid boolean `true` on an Internet-facing service because it trusts the entire forwarded chain and weakens IP-based rate limiting.
+
 Set `DEVSPACE_LOG_FORMAT=pretty` for local debugging.
 
 Set `DEVSPACE_LOG_SHELL_COMMANDS=1` only when you intentionally want command

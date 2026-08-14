@@ -1747,7 +1747,7 @@ export function createServer(
   sessionCleanupTimer.unref();
 
   if (config.logging.trustProxy) {
-    app.set("trust proxy", true);
+    app.set("trust proxy", config.logging.trustProxy);
   }
 
   app.use((req, res, next) => {
@@ -1934,7 +1934,9 @@ if (await isMainModule()) {
     console.log(`logging: ${config.logging.level} ${config.logging.format}`);
     console.log(`request logging: ${config.logging.requests ? "enabled" : "disabled"}`);
     console.log(`asset logging: ${config.logging.assets ? "enabled" : "disabled"}`);
-    console.log(`trust proxy: ${config.logging.trustProxy ? "enabled" : "disabled"}`);
+    console.log(
+      `trust proxy: ${config.logging.trustProxy === false ? "disabled" : config.logging.trustProxy === true ? "all proxies" : `${config.logging.trustProxy} hop${config.logging.trustProxy === 1 ? "" : "s"}`}`,
+    );
     const artifactDownloadStatus = !config.artifactsEnabled
       ? "disabled"
       : isArtifactDownloadSupportedPlatform()

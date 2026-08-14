@@ -86,6 +86,20 @@ function parseBoolean(value: string | undefined): boolean {
   return ["1", "true", "yes", "on"].includes(value?.toLowerCase() ?? "");
 }
 
+function parseTrustProxy(value: string | undefined): boolean | number {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized || ["0", "false", "no", "off"].includes(normalized)) return false;
+
+  if (/^[1-9]\d*$/.test(normalized)) {
+    const hops = Number(normalized);
+    if (!Number.isSafeInteger(hops)) throw new Error(`Invalid DEVSPACE_TRUST_PROXY: ${value}`);
+    return hops;
+  }
+
+  if (["true", "yes", "on"].includes(normalized)) return true;
+  throw new Error(`Invalid DEVSPACE_TRUST_PROXY: ${value}`);
+}
+
 function parseToolMode(env: NodeJS.ProcessEnv): ToolMode {
   const mode = env.DEVSPACE_TOOL_MODE;
   if (mode === "minimal" || mode === "full" || mode === "codex") return mode;
@@ -153,7 +167,7 @@ function parseLoggingConfig(env: NodeJS.ProcessEnv): LoggingConfig {
     assets: parseBoolean(env.DEVSPACE_LOG_ASSETS),
     toolCalls: env.DEVSPACE_LOG_TOOL_CALLS === undefined ? true : parseBoolean(env.DEVSPACE_LOG_TOOL_CALLS),
     shellCommands: parseBoolean(env.DEVSPACE_LOG_SHELL_COMMANDS),
-    trustProxy: parseBoolean(env.DEVSPACE_TRUST_PROXY),
+    trustProxy: parseTrustProxy(env.DEVSPACE_TRUST_PROXY),
   };
 }
 
