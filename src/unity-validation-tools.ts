@@ -32,7 +32,7 @@ export function registerUnityValidationTools(server: McpServer, runner: UnityVal
     {
       title: "Submit Unity validation",
       description:
-        "Queue compile/test/build validation of an immutable Git commit on this Unity worker. Pass a repository URL and hexadecimal commit SHA, never a branch or tag. The worker clones/fetches its own isolated checkout, selects the exact Unity version from ProjectSettings/ProjectVersion.txt, and executes the requested profile from .unity-validation.json or the built-in compile/test/playmode/full profiles.",
+        "Queue compile/test/build validation of an immutable Git commit on this Unity worker. Pass a repository URL and hexadecimal commit SHA, never a branch or tag. The worker clones/fetches its own isolated checkout, selects the exact Unity version from ProjectSettings/ProjectVersion.txt, optionally auto-installs a missing Editor when configured, and executes the requested profile from .unity-validation.json or the built-in compile/test/playmode/full profiles.",
       inputSchema: {
         repositoryUrl: z.string().min(1).describe("Git clone URL available to the Unity worker."),
         commit: z.string().regex(/^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/).describe("Full immutable hexadecimal Git commit SHA (40 or 64 characters)."),
@@ -76,7 +76,7 @@ export function registerUnityValidationTools(server: McpServer, runner: UnityVal
     {
       title: "Read Unity validation log",
       description:
-        "Read the tail of one artifact from a Unity validation job. Common artifacts are compile.log, editmode.log, editmode-results.xml, playmode.log, playmode-results.xml, build.log, validator-N.log, git-fetch.log, and summary.json.",
+        "Read the tail of one artifact from a Unity validation job. Common artifacts are unity-install.log, compile.log, editmode.log, editmode-results.xml, playmode.log, playmode-results.xml, build.log, validator-N.log, git-fetch.log, and summary.json.",
       inputSchema: {
         jobId: z.string().min(1),
         artifact: z.string().min(1).describe("Single artifact filename, not a path."),
@@ -114,7 +114,7 @@ export function registerUnityValidationTools(server: McpServer, runner: UnityVal
     {
       title: "Unity server health",
       description:
-        "Report Unity validation worker capacity, queue depth, and configured Unity editor roots. Use this to distinguish runner availability from source-code failures.",
+        "Report Unity validation worker capacity, queue depth, configured Unity editor roots, automatic Editor-install status, and versions currently being installed. Use this to distinguish runner availability from source-code failures.",
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     async () => ({

@@ -31,6 +31,11 @@ assert.equal(loadConfig(baseEnv).artifactMaxFileBytes, 100 * 1024 * 1024);
 assert.equal(loadConfig(baseEnv).unity.enabled, false);
 assert.equal(loadConfig(baseEnv).unity.maxConcurrentJobs, 1);
 assert.equal(loadConfig(baseEnv).unity.jobTimeoutSeconds, 30 * 60);
+assert.equal(loadConfig(baseEnv).unity.autoInstallEditors, false);
+assert.equal(loadConfig(baseEnv).unity.editorInstallTimeoutSeconds, 2 * 60 * 60);
+assert.equal(loadConfig(baseEnv).unity.editorInstaller, "unity-cli");
+assert.equal(loadConfig(baseEnv).unity.unityCliExecutable, "unity");
+assert.equal(loadConfig(baseEnv).unity.unityHubExecutable, "unityhub");
 assert.throws(
   () => loadConfig({ ...baseEnv, DEVSPACE_UNITY_RUNNER: "1" }),
   /DEVSPACE_UNITY_RUNNER requires DEVSPACE_UNITY_ALLOWED_REPOSITORIES/,
@@ -58,6 +63,26 @@ assert.equal(
 assert.equal(
   loadConfig({ ...baseEnv, DEVSPACE_UNITY_JOB_TIMEOUT_SECONDS: "45" }).unity.jobTimeoutSeconds,
   45,
+);
+assert.equal(
+  loadConfig({ ...baseEnv, DEVSPACE_UNITY_AUTO_INSTALL_EDITORS: "1" }).unity.autoInstallEditors,
+  true,
+);
+assert.equal(
+  loadConfig({ ...baseEnv, DEVSPACE_UNITY_EDITOR_INSTALL_TIMEOUT_SECONDS: "123" }).unity.editorInstallTimeoutSeconds,
+  123,
+);
+assert.equal(
+  loadConfig({ ...baseEnv, DEVSPACE_UNITY_EDITOR_INSTALLER: "hub" }).unity.editorInstaller,
+  "hub",
+);
+assert.equal(
+  loadConfig({ ...baseEnv, DEVSPACE_UNITY_CLI_EXECUTABLE: "/opt/unity" }).unity.unityCliExecutable,
+  "/opt/unity",
+);
+assert.equal(
+  loadConfig({ ...baseEnv, DEVSPACE_UNITY_HUB_EXECUTABLE: "/opt/unityhub" }).unity.unityHubExecutable,
+  "/opt/unityhub",
 );
 assert.deepEqual(
   loadConfig({ ...baseEnv, DEVSPACE_UNITY_EDITOR_ROOTS: "/unity/a,/unity/b" }).unity.editorRoots,
@@ -220,6 +245,14 @@ assert.throws(
 assert.throws(
   () => loadConfig({ ...baseEnv, DEVSPACE_UNITY_JOB_TIMEOUT_SECONDS: "0" }),
   /Invalid DEVSPACE_UNITY_JOB_TIMEOUT_SECONDS: 0/,
+);
+assert.throws(
+  () => loadConfig({ ...baseEnv, DEVSPACE_UNITY_EDITOR_INSTALL_TIMEOUT_SECONDS: "0" }),
+  /Invalid DEVSPACE_UNITY_EDITOR_INSTALL_TIMEOUT_SECONDS: 0/,
+);
+assert.throws(
+  () => loadConfig({ ...baseEnv, DEVSPACE_UNITY_EDITOR_INSTALLER: "magic" }),
+  /Invalid DEVSPACE_UNITY_EDITOR_INSTALLER: magic/,
 );
 
 assert.equal(loadConfig(baseEnv).publicBaseUrl, "http://127.0.0.1:7676");

@@ -178,6 +178,12 @@ function parseWidgetMode(value: string | undefined): WidgetMode {
   throw new Error(`Invalid DEVSPACE_WIDGETS: ${value}`);
 }
 
+function parseUnityEditorInstaller(value: string | undefined): UnityRunnerConfig["editorInstaller"] {
+  if (!value || value === "unity-cli") return "unity-cli";
+  if (value === "hub") return "hub";
+  throw new Error(`Invalid DEVSPACE_UNITY_EDITOR_INSTALLER: ${value}`);
+}
+
 function parseRequiredSecret(value: string | undefined, name: string): string {
   const secret = value?.trim();
   if (!secret) {
@@ -310,6 +316,25 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
         "DEVSPACE_UNITY_JOB_TIMEOUT_SECONDS",
         24 * 60 * 60,
       ),
+      autoInstallEditors: env.DEVSPACE_UNITY_AUTO_INSTALL_EDITORS === undefined
+        ? files.config.unity?.autoInstallEditors === true
+        : parseBoolean(env.DEVSPACE_UNITY_AUTO_INSTALL_EDITORS),
+      editorInstallTimeoutSeconds: parsePositiveInteger(
+        env.DEVSPACE_UNITY_EDITOR_INSTALL_TIMEOUT_SECONDS
+          ?? numberConfigValue(files.config.unity?.editorInstallTimeoutSeconds),
+        2 * 60 * 60,
+        "DEVSPACE_UNITY_EDITOR_INSTALL_TIMEOUT_SECONDS",
+        24 * 60 * 60,
+      ),
+      editorInstaller: parseUnityEditorInstaller(
+        env.DEVSPACE_UNITY_EDITOR_INSTALLER ?? files.config.unity?.editorInstaller,
+      ),
+      unityCliExecutable: env.DEVSPACE_UNITY_CLI_EXECUTABLE?.trim()
+        || files.config.unity?.unityCliExecutable?.trim()
+        || "unity",
+      unityHubExecutable: env.DEVSPACE_UNITY_HUB_EXECUTABLE?.trim()
+        || files.config.unity?.unityHubExecutable?.trim()
+        || "unityhub",
       allowedRepositoryPrefixes: selectedUnityAllowedRepositories,
     },
     logging: parseLoggingConfig(env),

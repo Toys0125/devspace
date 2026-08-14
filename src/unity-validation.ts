@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createWriteStream, readdirSync, readFileSync, writeFileSync, type Dirent } from "node:fs";
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -21,12 +21,19 @@ export type UnityValidationFailureCategory =
   | "TIMEOUT"
   | "CANCELLED";
 
+export type UnityEditorInstaller = "unity-cli" | "hub";
+
 export interface UnityRunnerConfig {
   enabled: boolean;
   stateDir: string;
   editorRoots: string[];
   maxConcurrentJobs: number;
   jobTimeoutSeconds: number;
+  autoInstallEditors: boolean;
+  editorInstallTimeoutSeconds: number;
+  editorInstaller: UnityEditorInstaller;
+  unityCliExecutable: string;
+  unityHubExecutable: string;
   allowedRepositoryPrefixes: string[];
 }
 
@@ -59,6 +66,7 @@ export interface UnityValidationSummary {
   profile: string;
   projectPath?: string;
   unityVersion?: string;
+  unityChangeset?: string;
   editorPath?: string;
   status: UnityValidationStatus;
   failureCategory?: UnityValidationFailureCategory;
@@ -110,6 +118,21 @@ interface CommandResult {
   cancelled: boolean;
 }
 
+export interface UnityEditorIdentity {
+  version: string;
+  changeset?: string;
+}
+
+interface UnityEditorInstallResult {
+  status: "passed" | "failed" | "cancelled";
+  durationSeconds: number;
+  exitCode?: number | null;
+  editorPath?: string;
+  failureCode?: string;
+  message?: string;
+  sharedLogPath: string;
+}
+
 const DEFAULT_PROFILES: Record<string, UnityValidationProfile> = {
   compile: { compile: true },
   test: { compile: true, editModeTests: true },
@@ -135,6 +158,9 @@ export class UnityValidationRunner {
   private readonly jobs = new Map<string, InternalJob>();
   private readonly queue: string[] = [];
   private readonly repositoryLockTails = new Map<string, Promise<void>>();
+  private readonly editorInstallPromises = new Map<string, Promise<UnityEditorInstallResult>>();
+  private editorInstallerTail: Promise<void> = Promise.resolve();
+  private readonly editorInstallerAbortController = new AbortController();
   private readonly freeSlots: number[];
   private activeJobs = 0;
   private shuttingDown = false;
@@ -232,6 +258,9 @@ export class UnityValidationRunner {
     queuedJobs: number;
     maxConcurrentJobs: number;
     editorRoots: string[];
+    autoInstallEditors: boolean;
+    editorInstaller: UnityEditorInstaller;
+    installingEditorVersions: string[];
   } {
     return {
       enabled: this.config.enabled,
@@ -239,11 +268,15 @@ export class UnityValidationRunner {
       queuedJobs: this.queue.length,
       maxConcurrentJobs: this.config.maxConcurrentJobs,
       editorRoots: [...this.config.editorRoots],
+      autoInstallEditors: this.config.autoInstallEditors,
+      editorInstaller: this.config.editorInstaller,
+      installingEditorVersions: [...this.editorInstallPromises.keys()].sort(),
     };
   }
 
   async shutdown(): Promise<void> {
     this.shuttingDown = true;
+    this.editorInstallerAbortController.abort();
     const writes: Promise<void>[] = [];
     for (const job of this.jobs.values()) {
       if (job.summary.status === "queued" || job.summary.status === "running") {
@@ -332,12 +365,12 @@ export class UnityValidationRunner {
       job.summary.validatedCommit = job.request.commit;
       let projectConfig: UnityValidationProjectConfig;
       let projectPath: string;
-      let version: string;
+      let editorIdentity: UnityEditorIdentity;
       try {
         projectConfig = await loadProjectConfig(checkoutPath, job.request.configPath ?? ".unity-validation.json");
         projectPath = resolve(checkoutPath, job.request.projectPath ?? projectConfig.projectPath ?? ".");
         assertPathInside(projectPath, checkoutPath, "Unity project path");
-        version = await readUnityVersion(projectPath);
+        editorIdentity = await readUnityEditorIdentity(projectPath);
       } catch (error) {
         await this.fail(
           job,
@@ -348,12 +381,10 @@ export class UnityValidationRunner {
         return;
       }
       job.summary.projectPath = projectPath;
-      job.summary.unityVersion = version;
-      const editorPath = await findUnityEditor(version, this.config.editorRoots);
-      if (!editorPath) {
-        await this.fail(job, "INFRASTRUCTURE_FAILURE", "UNITY_EDITOR_MISSING", `Unity ${version} was not found under: ${this.config.editorRoots.join(", ")}`);
-        return;
-      }
+      job.summary.unityVersion = editorIdentity.version;
+      job.summary.unityChangeset = editorIdentity.changeset;
+      const editorPath = await this.resolveUnityEditor(job, editorIdentity);
+      if (!editorPath || job.summary.status !== "running") return;
       job.summary.editorPath = editorPath;
 
       const profileName = job.summary.profile;
@@ -414,7 +445,7 @@ export class UnityValidationRunner {
       }
       job.summary.status = "passed";
       job.summary.completedAt = new Date().toISOString();
-      job.summary.message = `Validated ${job.summary.validatedCommit} with Unity ${version} using profile '${profileName}'.`;
+      job.summary.message = `Validated ${job.summary.validatedCommit} with Unity ${editorIdentity.version} using profile '${profileName}'.`;
       await this.persistSummary(job);
     } catch (error) {
       if (job.abortController.signal.aborted) {
@@ -573,6 +604,262 @@ export class UnityValidationRunner {
     }
   }
 
+  private async resolveUnityEditor(
+    job: InternalJob,
+    identity: UnityEditorIdentity,
+  ): Promise<string | undefined> {
+    const existing = await findUnityEditor(identity.version, this.config.editorRoots);
+    if (existing) return existing;
+
+    if (!this.config.autoInstallEditors) {
+      await this.fail(
+        job,
+        "INFRASTRUCTURE_FAILURE",
+        "UNITY_EDITOR_MISSING",
+        `Unity ${identity.version} was not found under: ${this.config.editorRoots.join(", ")}. Automatic editor installation is disabled.`,
+      );
+      return undefined;
+    }
+
+    const installRoot = this.config.editorRoots[0];
+    if (!installRoot) {
+      await this.fail(
+        job,
+        "INFRASTRUCTURE_FAILURE",
+        "UNITY_EDITOR_INSTALL_ROOT_MISSING",
+        "Automatic Unity Editor installation requires at least one configured editor root.",
+      );
+      return undefined;
+    }
+
+    let installPromise = this.editorInstallPromises.get(identity.version);
+    if (!installPromise) {
+      installPromise = this.withEditorInstallerLock(() => this.installUnityEditor(identity, installRoot));
+      this.editorInstallPromises.set(identity.version, installPromise);
+      const trackedPromise = installPromise;
+      const cleanupTrackedInstall = () => {
+        if (this.editorInstallPromises.get(identity.version) === trackedPromise) {
+          this.editorInstallPromises.delete(identity.version);
+        }
+      };
+      void trackedPromise.then(cleanupTrackedInstall, cleanupTrackedInstall);
+    }
+
+    const result = await waitForPromiseOrAbort(installPromise, job.abortController.signal);
+    if (!result) return undefined;
+
+    const jobLogName = "unity-install.log";
+    await copyFile(result.sharedLogPath, join(job.summary.artifactsDir, jobLogName)).catch(() => undefined);
+    const step: UnityValidationStep = {
+      name: "editor-install",
+      status: result.status,
+      durationSeconds: result.durationSeconds,
+      exitCode: result.exitCode,
+      log: jobLogName,
+      failureCategory: result.status === "failed" ? "INFRASTRUCTURE_FAILURE" : undefined,
+      failureCode: result.failureCode,
+      message: result.message,
+    };
+    job.summary.steps.push(step);
+    await this.persistSummary(job);
+
+    if (result.status === "cancelled") {
+      await this.fail(
+        job,
+        "INFRASTRUCTURE_FAILURE",
+        result.failureCode ?? "UNITY_EDITOR_INSTALL_CANCELLED",
+        result.message ?? `Unity ${identity.version} installation was cancelled.`,
+      );
+      return undefined;
+    }
+    if (result.status === "failed" || !result.editorPath) {
+      await this.fail(
+        job,
+        "INFRASTRUCTURE_FAILURE",
+        result.failureCode ?? "UNITY_EDITOR_INSTALL_FAILED",
+        result.message ?? `Unity ${identity.version} could not be installed automatically.`,
+      );
+      return undefined;
+    }
+
+    return result.editorPath;
+  }
+
+  private async installUnityEditor(
+    identity: UnityEditorIdentity,
+    installRoot: string,
+  ): Promise<UnityEditorInstallResult> {
+    const startedAt = Date.now();
+    const logsDir = join(this.config.stateDir, "editor-installs");
+    const safeVersion = identity.version.replace(/[^A-Za-z0-9._-]+/g, "_");
+    const sharedLogPath = join(logsDir, `${safeVersion}-${randomUUID()}.log`);
+    const timeoutMs = this.config.editorInstallTimeoutSeconds * 1_000;
+
+    try {
+      await mkdir(logsDir, { recursive: true });
+      await mkdir(installRoot, { recursive: true });
+      const useUnityCli = this.config.editorInstaller === "unity-cli";
+      const installerLabel = useUnityCli ? "Unity CLI" : "Unity Hub";
+      const installerExecutable = useUnityCli
+        ? this.config.unityCliExecutable
+        : this.config.unityHubExecutable;
+      const installPathArgs = useUnityCli
+        ? ["--non-interactive", "--no-pager", "install-path", "--set", installRoot]
+        : ["--headless", "install-path", "--set", installRoot];
+      const installPathResult = await runProcess(
+        installerExecutable,
+        installPathArgs,
+        this.config.stateDir,
+        sharedLogPath,
+        timeoutMs,
+        this.editorInstallerAbortController.signal,
+      );
+      if (installPathResult.cancelled) {
+        return {
+          status: "cancelled",
+          durationSeconds: roundSeconds(Date.now() - startedAt),
+          exitCode: installPathResult.exitCode,
+          failureCode: "UNITY_EDITOR_INSTALL_CANCELLED",
+          message: `Unity ${identity.version} installation was cancelled because the validation worker is shutting down.`,
+          sharedLogPath,
+        };
+      }
+      if (installPathResult.timedOut) {
+        return {
+          status: "failed",
+          durationSeconds: roundSeconds(Date.now() - startedAt),
+          exitCode: installPathResult.exitCode,
+          failureCode: "UNITY_EDITOR_INSTALL_TIMEOUT",
+          message: `Configuring the Unity Editor install path exceeded ${this.config.editorInstallTimeoutSeconds} seconds.`,
+          sharedLogPath,
+        };
+      }
+      if (installPathResult.exitCode !== 0) {
+        return {
+          status: "failed",
+          durationSeconds: roundSeconds(Date.now() - startedAt),
+          exitCode: installPathResult.exitCode,
+          failureCode: "UNITY_EDITOR_INSTALL_PATH_FAILED",
+          message: `${installerLabel} could not set the Editor install path to ${installRoot}.`,
+          sharedLogPath,
+        };
+      }
+
+      const installArgs = useUnityCli
+        ? [
+            "--non-interactive",
+            "--no-pager",
+            "install",
+            identity.version,
+            ...(identity.changeset ? ["--changeset", identity.changeset] : []),
+            "--yes",
+          ]
+        : [
+            "--headless",
+            "install",
+            "--version",
+            identity.version,
+            ...(identity.changeset ? ["--changeset", identity.changeset] : []),
+          ];
+      const installResult = await runProcess(
+        installerExecutable,
+        installArgs,
+        this.config.stateDir,
+        sharedLogPath,
+        timeoutMs,
+        this.editorInstallerAbortController.signal,
+      );
+      if (installResult.cancelled) {
+        return {
+          status: "cancelled",
+          durationSeconds: roundSeconds(Date.now() - startedAt),
+          exitCode: installResult.exitCode,
+          failureCode: "UNITY_EDITOR_INSTALL_CANCELLED",
+          message: `Unity ${identity.version} installation was cancelled because the validation worker is shutting down.`,
+          sharedLogPath,
+        };
+      }
+      if (installResult.timedOut) {
+        return {
+          status: "failed",
+          durationSeconds: roundSeconds(Date.now() - startedAt),
+          exitCode: installResult.exitCode,
+          failureCode: "UNITY_EDITOR_INSTALL_TIMEOUT",
+          message: `Installing Unity ${identity.version} exceeded ${this.config.editorInstallTimeoutSeconds} seconds.`,
+          sharedLogPath,
+        };
+      }
+      if (installResult.exitCode !== 0) {
+        const revisionHint = identity.changeset
+          ? ` with changeset ${identity.changeset}`
+          : "; the project did not provide m_EditorVersionWithRevision, so archive-only releases may require a changeset";
+        return {
+          status: "failed",
+          durationSeconds: roundSeconds(Date.now() - startedAt),
+          exitCode: installResult.exitCode,
+          failureCode: "UNITY_EDITOR_INSTALL_FAILED",
+          message: `${installerLabel} failed to install Unity ${identity.version}${revisionHint}. See unity-install.log.`,
+          sharedLogPath,
+        };
+      }
+
+      const editorPath = await findUnityEditor(identity.version, this.config.editorRoots);
+      if (!editorPath) {
+        return {
+          status: "failed",
+          durationSeconds: roundSeconds(Date.now() - startedAt),
+          exitCode: installResult.exitCode,
+          failureCode: "UNITY_EDITOR_INSTALL_INCOMPLETE",
+          message: `${installerLabel} reported success, but Unity ${identity.version} was not found under: ${this.config.editorRoots.join(", ")}.`,
+          sharedLogPath,
+        };
+      }
+
+      return {
+        status: "passed",
+        durationSeconds: roundSeconds(Date.now() - startedAt),
+        exitCode: installResult.exitCode,
+        editorPath,
+        message: `Installed Unity ${identity.version}${identity.changeset ? ` (${identity.changeset})` : ""} into ${installRoot} with ${installerLabel}.`,
+        sharedLogPath,
+      };
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code === "ENOENT"
+        ? "UNITY_INSTALLER_MISSING"
+        : "UNITY_EDITOR_INSTALL_FAILED";
+      const installerExecutable = this.config.editorInstaller === "unity-cli"
+        ? this.config.unityCliExecutable
+        : this.config.unityHubExecutable;
+      const installerVariable = this.config.editorInstaller === "unity-cli"
+        ? "DEVSPACE_UNITY_CLI_EXECUTABLE"
+        : "DEVSPACE_UNITY_HUB_EXECUTABLE";
+      return {
+        status: "failed",
+        durationSeconds: roundSeconds(Date.now() - startedAt),
+        failureCode: code,
+        message: code === "UNITY_INSTALLER_MISSING"
+          ? `Unity editor installer '${installerExecutable}' was not found; install the configured backend or set ${installerVariable}.`
+          : `Automatic Unity ${identity.version} installation failed: ${error instanceof Error ? error.message : String(error)}`,
+        sharedLogPath,
+      };
+    }
+  }
+
+  private async withEditorInstallerLock<T>(work: () => Promise<T>): Promise<T> {
+    const previous = this.editorInstallerTail;
+    let release!: () => void;
+    const gate = new Promise<void>((resolveGate) => {
+      release = resolveGate;
+    });
+    this.editorInstallerTail = previous.then(() => gate);
+    await previous;
+    try {
+      return await work();
+    } finally {
+      release();
+    }
+  }
+
   private async runUnityStep(
     job: InternalJob,
     editorPath: string,
@@ -726,11 +1013,21 @@ export class UnityValidationRunner {
   }
 }
 
+export async function readUnityEditorIdentity(projectPath: string): Promise<UnityEditorIdentity> {
+  const versionPath = join(projectPath, "ProjectSettings", "ProjectVersion.txt");
+  const text = await readFile(versionPath, "utf8");
+  const version = text.match(/^m_EditorVersion:\s*(\S+)\s*$/m)?.[1];
+  if (!version) throw new Error(`Unable to read m_EditorVersion from ${versionPath}`);
+
+  const revision = text.match(/^m_EditorVersionWithRevision:\s*(\S+)\s+\(([0-9a-fA-F]+)\)\s*$/m);
+  return {
+    version,
+    changeset: revision?.[1] === version ? revision[2] : undefined,
+  };
+}
+
 export async function readUnityVersion(projectPath: string): Promise<string> {
-  const text = await readFile(join(projectPath, "ProjectSettings", "ProjectVersion.txt"), "utf8");
-  const match = text.match(/^m_EditorVersion:\s*(\S+)\s*$/m);
-  if (!match?.[1]) throw new Error(`Unable to read m_EditorVersion from ${join(projectPath, "ProjectSettings", "ProjectVersion.txt")}`);
-  return match[1];
+  return (await readUnityEditorIdentity(projectPath)).version;
 }
 
 export async function findUnityEditor(version: string, roots: string[]): Promise<string | undefined> {
@@ -855,6 +1152,7 @@ async function runProcess(
   signal?: AbortSignal,
   onSpawn?: (child: ChildProcess) => void,
 ): Promise<CommandResult> {
+  if (signal?.aborted) return { exitCode: null, timedOut: false, cancelled: true };
   await mkdir(cwd, { recursive: true });
   const stream = logPath ? createWriteStream(logPath, { flags: "a" }) : undefined;
   return new Promise<CommandResult>((resolvePromise, reject) => {
@@ -923,6 +1221,24 @@ async function runProcess(
       child?.stderr?.unpipe(stream);
       stream.end(() => resolveOnce(result));
     });
+  });
+}
+
+async function waitForPromiseOrAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T | undefined> {
+  if (signal.aborted) return undefined;
+  return new Promise<T | undefined>((resolvePromise, reject) => {
+    const abort = () => resolvePromise(undefined);
+    signal.addEventListener("abort", abort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", abort);
+        resolvePromise(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", abort);
+        reject(error);
+      },
+    );
   });
 }
 

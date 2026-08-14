@@ -8,6 +8,7 @@ import {
   classifyUnityInfrastructureFailure,
   findUnityEditor,
   parseUnityTestFailureCount,
+  readUnityEditorIdentity,
   readUnityVersion,
   UnityValidationRunner,
 } from "./unity-validation.js";
@@ -22,7 +23,11 @@ const editor = join(editorRoot, version, "Editor", "Unity");
 
 const unityProject = join(repository, "UnityProject");
 mkdirSync(join(unityProject, "ProjectSettings"), { recursive: true });
-writeFileSync(join(unityProject, "ProjectSettings", "ProjectVersion.txt"), `m_EditorVersion: ${version}\n`);
+const changeset = "0123456789abcdef0123456789abcdef01234567";
+writeFileSync(
+  join(unityProject, "ProjectSettings", "ProjectVersion.txt"),
+  `m_EditorVersion: ${version}\nm_EditorVersionWithRevision: ${version} (${changeset})\n`,
+);
 writeFileSync(
   join(repository, ".unity-validation.json"),
   JSON.stringify(
@@ -76,6 +81,7 @@ execFileSync("git", ["commit", "-m", "test project"], { cwd: repository, stdio: 
 const commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8" }).trim();
 
 assert.equal(await readUnityVersion(unityProject), version);
+assert.deepEqual(await readUnityEditorIdentity(unityProject), { version, changeset });
 assert.equal(await findUnityEditor(version, [editorRoot]), editor);
 assert.equal(classifyUnityInfrastructureFailure("No valid Unity Editor license"), "UNITY_LICENSE_FAILURE");
 assert.equal(classifyUnityInfrastructureFailure("write failed: No space left on device"), "DISK_FULL");
@@ -104,6 +110,11 @@ const runner = new UnityValidationRunner({
   editorRoots: [editorRoot],
   maxConcurrentJobs: 2,
   jobTimeoutSeconds: 30,
+  autoInstallEditors: false,
+  editorInstallTimeoutSeconds: 30,
+  editorInstaller: "unity-cli",
+  unityCliExecutable: "unity",
+  unityHubExecutable: "unityhub",
   allowedRepositoryPrefixes: [root],
 }, { allowLocalRepositoriesForTests: true });
 
@@ -208,12 +219,99 @@ assert.equal(runner.health().activeJobs, 0);
 assert.equal(runner.health().queuedJobs, 0);
 await runner.shutdown();
 
+const autoRepository = join(root, "auto-repo");
+const autoEditorRoot = join(root, "auto-editors");
+const autoStateDir = join(root, "auto-state");
+const autoVersion = "6000.5.7f1";
+const autoChangeset = "abcdef1234567890abcdef1234567890abcdef12";
+mkdirSync(join(autoRepository, "ProjectSettings"), { recursive: true });
+writeFileSync(
+  join(autoRepository, "ProjectSettings", "ProjectVersion.txt"),
+  `m_EditorVersion: ${autoVersion}\nm_EditorVersionWithRevision: ${autoVersion} (${autoChangeset})\n`,
+);
+execFileSync("git", ["init"], { cwd: autoRepository, stdio: "ignore" });
+execFileSync("git", ["config", "user.name", "DevSpace Test"], { cwd: autoRepository });
+execFileSync("git", ["config", "user.email", "devspace@example.invalid"], { cwd: autoRepository });
+execFileSync("git", ["add", "."], { cwd: autoRepository });
+execFileSync("git", ["commit", "-m", "auto install project"], { cwd: autoRepository, stdio: "ignore" });
+const autoCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: autoRepository, encoding: "utf8" }).trim();
+
+const fakeUnityCli = join(root, "fake-unity-cli");
+const installCountPath = join(root, "fake-unity-cli-install-count.txt");
+writeFileSync(
+  fakeUnityCli,
+  `#!/usr/bin/env node
+const fs = require("node:fs");
+const path = require("node:path");
+const args = process.argv.slice(2);
+const installRoot = ${JSON.stringify(autoEditorRoot)};
+const countPath = ${JSON.stringify(installCountPath)};
+const expectedChangeset = ${JSON.stringify(autoChangeset)};
+if (!args.includes("--non-interactive") || !args.includes("--no-pager")) process.exit(4);
+if (args.includes("install-path")) process.exit(0);
+if (!args.includes("install") || !args.includes("--yes")) process.exit(2);
+const installIndex = args.indexOf("install");
+const changesetIndex = args.indexOf("--changeset");
+const requestedVersion = installIndex >= 0 ? args[installIndex + 1] : undefined;
+const requestedChangeset = changesetIndex >= 0 ? args[changesetIndex + 1] : undefined;
+if (!requestedVersion || requestedChangeset !== expectedChangeset) process.exit(3);
+const count = fs.existsSync(countPath) ? Number(fs.readFileSync(countPath, "utf8")) : 0;
+fs.writeFileSync(countPath, String(count + 1));
+console.log("fake unity cli install " + requestedVersion + " " + requestedChangeset);
+setTimeout(() => {
+  const editor = path.join(installRoot, requestedVersion, "Editor", "Unity");
+  fs.mkdirSync(path.dirname(editor), { recursive: true });
+  fs.writeFileSync(editor, '#!/usr/bin/env node\\nconst fs=require("node:fs");\\nconst args=process.argv.slice(2);\\nconst i=args.indexOf("-logFile");\\nif(i>=0){fs.mkdirSync(require("node:path").dirname(args[i+1]),{recursive:true});fs.writeFileSync(args[i+1],"auto-installed unity success\\\\n");}\\nprocess.exit(0);\\n');
+  fs.chmodSync(editor, 0o755);
+  process.exit(0);
+}, 250);
+`,
+);
+chmodSync(fakeUnityCli, 0o755);
+
+const autoRunner = new UnityValidationRunner({
+  enabled: true,
+  stateDir: autoStateDir,
+  editorRoots: [autoEditorRoot],
+  maxConcurrentJobs: 2,
+  jobTimeoutSeconds: 30,
+  autoInstallEditors: true,
+  editorInstallTimeoutSeconds: 30,
+  editorInstaller: "unity-cli",
+  unityCliExecutable: fakeUnityCli,
+  unityHubExecutable: "unityhub",
+  allowedRepositoryPrefixes: [root],
+}, { allowLocalRepositoriesForTests: true });
+const autoFirst = await autoRunner.submit({ repositoryUrl: autoRepository, commit: autoCommit, profile: "compile" });
+const autoSecond = await autoRunner.submit({ repositoryUrl: autoRepository, commit: autoCommit, profile: "compile" });
+const [autoFirstResult, autoSecondResult] = await Promise.all([
+  waitForTerminal(autoRunner, autoFirst.jobId),
+  waitForTerminal(autoRunner, autoSecond.jobId),
+]);
+assert.equal(autoFirstResult.status, "passed", JSON.stringify(autoFirstResult, null, 2));
+assert.equal(autoSecondResult.status, "passed", JSON.stringify(autoSecondResult, null, 2));
+assert.equal(autoFirstResult.unityChangeset, autoChangeset);
+assert.equal(autoSecondResult.unityChangeset, autoChangeset);
+assert.equal(readFileSync(installCountPath, "utf8"), "1");
+const installSteps = [autoFirstResult, autoSecondResult]
+  .flatMap((result) => result.steps)
+  .filter((step) => step.name === "editor-install");
+assert.ok(installSteps.length >= 1);
+assert.ok(installSteps.every((step) => step.status === "passed"));
+assert.equal(autoRunner.health().autoInstallEditors, true);
+await autoRunner.shutdown();
+
 const restoredRunner = new UnityValidationRunner({
   enabled: true,
   stateDir,
   editorRoots: [editorRoot],
   maxConcurrentJobs: 2,
   jobTimeoutSeconds: 30,
+  autoInstallEditors: false,
+  editorInstallTimeoutSeconds: 30,
+  editorInstaller: "unity-cli",
+  unityCliExecutable: "unity",
+  unityHubExecutable: "unityhub",
   allowedRepositoryPrefixes: [root],
 }, { allowLocalRepositoriesForTests: true });
 assert.equal(restoredRunner.get(first.jobId).status, "passed");

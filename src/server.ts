@@ -1946,6 +1946,10 @@ if (await isMainModule()) {
     if (config.unity.enabled) {
       console.log(`unity validation runner: enabled (${config.unity.maxConcurrentJobs} concurrent job${config.unity.maxConcurrentJobs === 1 ? "" : "s"})`);
       console.log(`unity editor roots: ${config.unity.editorRoots.join(", ")}`);
+      const editorInstallerExecutable = config.unity.editorInstaller === "unity-cli"
+        ? config.unity.unityCliExecutable
+        : config.unity.unityHubExecutable;
+      console.log(`unity editor auto-install: ${config.unity.autoInstallEditors ? `enabled via ${config.unity.editorInstaller} (${editorInstallerExecutable})` : "disabled"}`);
     }
     if (config.subagents) {
       console.log(`subagent providers: ${formatLocalAgentProviderAvailabilitySummary(localAgentProviders)}`);

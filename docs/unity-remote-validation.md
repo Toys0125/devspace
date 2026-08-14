@@ -50,6 +50,10 @@ DEVSPACE_UNITY_STATE_DIR=/root/.local/share/devspace/unity-runner
 DEVSPACE_UNITY_EDITOR_ROOTS=/root/Unity/Hub/Editor
 DEVSPACE_UNITY_MAX_CONCURRENT_JOBS=1
 DEVSPACE_UNITY_JOB_TIMEOUT_SECONDS=1800
+DEVSPACE_UNITY_AUTO_INSTALL_EDITORS=1
+DEVSPACE_UNITY_EDITOR_INSTALL_TIMEOUT_SECONDS=7200
+DEVSPACE_UNITY_EDITOR_INSTALLER=unity-cli
+DEVSPACE_UNITY_CLI_EXECUTABLE=unity
 DEVSPACE_UNITY_ALLOWED_REPOSITORIES=https://github.com/BasisVR/,https://github.com/Toys0125/
 ```
 
@@ -59,8 +63,30 @@ development-only worker, `DEVSPACE_UNITY_ALLOW_ANY_REPOSITORY=1` is the explicit
 escape hatch; do not use it on a worker exposed to untrusted submissions.
 
 The exact editor is selected from the project's
-`ProjectSettings/ProjectVersion.txt`. A missing editor is classified as an
-infrastructure failure rather than a source failure.
+`ProjectSettings/ProjectVersion.txt`. When `DEVSPACE_UNITY_AUTO_INSTALL_EDITORS=1`,
+a missing version is installed into the first configured editor root before
+validation continues. The default backend is Unity's standalone `unity` CLI,
+which is suitable for headless/CI containers; the older Unity Hub CLI remains
+available only as `DEVSPACE_UNITY_EDITOR_INSTALLER=hub` for compatibility.
+
+The runner also reads `m_EditorVersionWithRevision` when present and supplies
+that changeset to the installer. This is important for archive-only Editor
+versions because the worker does not need a hardcoded version-to-changeset table.
+For example, Basis currently records `6000.5.7f1 (017862109af0)` and the worker
+can request that exact Editor build automatically.
+
+Editor installations are deduplicated by version and globally serialized so
+parallel validation jobs cannot race the installer or download the same Editor
+version twice. A job waiting on an install can still be cancelled; the shared
+install may continue so another queued validation can reuse it. Server shutdown
+cancels active installer processes.
+
+Automatic installs produce an `editor-install` validation step and
+`unity-install.log`. Missing installer executables, install timeouts, download
+or installer failures, and a reported-success-but-missing Editor remain
+`INFRASTRUCTURE_FAILURE`; they are never treated as source failures. Automatic
+installation is disabled by default because Editor downloads are large and
+consume network/disk resources.
 
 ## Project configuration
 
@@ -122,12 +148,21 @@ WORKDIR /src/devspace
 # Dockerfile lives in another repository, clone the fork at a pinned SHA here
 # instead.
 COPY devspace/package.json devspace/package-lock.json ./
+# DevSpace's postinstall lifecycle script runs during npm ci.
+COPY devspace/scripts/ ./scripts/
 RUN npm ci
 COPY devspace/ ./
 RUN npm run build \
  && npm pack --pack-destination /out
 
 FROM <your-unity-server-base-image>
+
+# Unity's standalone CLI is currently distributed from the beta channel.
+# Install it outside /root so a persistent /root volume cannot pin an old CLI.
+RUN curl -fsSL https://public-cdn.cloud.unity3d.com/hub/prod/cli/install.sh \
+ | UNITY_CLI_CHANNEL=beta UNITY_CLI_HOME=/usr/local bash \
+ && unity --version
+
 COPY --from=devspace-build /out/*.tgz /tmp/devspace.tgz
 RUN npm install -g /tmp/devspace.tgz \
  && rm /tmp/devspace.tgz \

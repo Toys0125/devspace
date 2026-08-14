@@ -182,6 +182,11 @@ installed:
 | `DEVSPACE_UNITY_STATE_DIR` | `<DEVSPACE_STATE_DIR>/unity-runner` | Mirrors, isolated job checkouts, logs, and receipts. |
 | `DEVSPACE_UNITY_MAX_CONCURRENT_JOBS` | `1` | Maximum simultaneous Unity jobs (1-32). |
 | `DEVSPACE_UNITY_JOB_TIMEOUT_SECONDS` | `1800` | Per Git/Unity command timeout. |
+| `DEVSPACE_UNITY_AUTO_INSTALL_EDITORS` | `0` | Automatically install a missing exact Editor version before validation. |
+| `DEVSPACE_UNITY_EDITOR_INSTALL_TIMEOUT_SECONDS` | `7200` | Timeout for each automatic Editor install operation. |
+| `DEVSPACE_UNITY_EDITOR_INSTALLER` | `unity-cli` | Editor installer backend: `unity-cli` (recommended) or legacy `hub`. |
+| `DEVSPACE_UNITY_CLI_EXECUTABLE` | `unity` | Standalone Unity CLI executable used by the default installer backend. |
+| `DEVSPACE_UNITY_HUB_EXECUTABLE` | `unityhub` | Deprecated Unity Hub CLI executable used only when `DEVSPACE_UNITY_EDITOR_INSTALLER=hub`. |
 | `DEVSPACE_UNITY_ALLOWED_REPOSITORIES` | empty | Comma-separated repository URL prefix allowlist. Required when the Unity runner is enabled. |
 | `DEVSPACE_UNITY_ALLOW_ANY_REPOSITORY` | `0` | Unsafe development-only opt-in to run repositories without an allowlist. |
 

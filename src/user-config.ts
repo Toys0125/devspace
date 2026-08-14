@@ -27,6 +27,11 @@ export interface DevspaceUserConfig {
     editorRoots?: string[];
     maxConcurrentJobs?: number;
     jobTimeoutSeconds?: number;
+    autoInstallEditors?: boolean;
+    editorInstallTimeoutSeconds?: number;
+    editorInstaller?: "unity-cli" | "hub";
+    unityCliExecutable?: string;
+    unityHubExecutable?: string;
     allowedRepositoryPrefixes?: string[];
     allowAnyRepository?: boolean;
   };

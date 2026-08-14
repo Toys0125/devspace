@@ -62,12 +62,15 @@ Treat failure categories differently:
 - `BUILD_FAILURE`: inspect the build step and project build pipeline.
 - `VALIDATION_FAILURE`: inspect the custom validator/profile configuration.
 - `INFRASTRUCTURE_FAILURE`: do not change working source merely to address a
-  missing editor, Unity license problem, Git fetch problem, or disk failure.
+  missing editor/install failure, Unity license problem, Git fetch problem, or
+  disk failure. A worker configured for automatic Editor installation will
+  attempt to install the exact missing version before returning this category.
 - `TIMEOUT`: inspect the log before deciding whether source or infrastructure is
   responsible.
 
-`unity_server_health` can be used to check worker capacity and configured editor
-roots.
+`unity_server_health` can be used to check worker capacity, configured editor
+roots, whether automatic Editor installation is enabled, and versions currently
+being installed.
 
 ## Repository configuration
 
