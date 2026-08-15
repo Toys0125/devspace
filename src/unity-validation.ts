@@ -1184,7 +1184,14 @@ export function extractUnityPersonalSerial(license: string): string {
 }
 
 export function classifyUnityInfrastructureFailure(log: string): string | undefined {
-  if (/No valid Unity Editor license|LicensingClient|license.*(failed|invalid|unavailable)/i.test(log)) return "UNITY_LICENSE_FAILURE";
+  if (
+    /No valid Unity Editor license/i.test(log)
+    || /'com\.unity\.editor\.headless' was not found/i.test(log)
+    || /Machine bindings don't match/i.test(log)
+    || /Legacy MachineBinding validation failed/i.test(log)
+    || /license.*(?:activation|validation).*(?:failed|invalid)/i.test(log)
+    || /license.*(?:expired|revoked)/i.test(log)
+  ) return "UNITY_LICENSE_FAILURE";
   if (/No space left on device|disk full/i.test(log)) return "DISK_FULL";
   return undefined;
 }
