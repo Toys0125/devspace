@@ -32,6 +32,7 @@ export interface DevspaceUserConfig {
     editorInstaller?: "unity-cli" | "hub";
     unityCliExecutable?: string;
     unityHubExecutable?: string;
+    xvfbExecutable?: string;
     personalLicenseFile?: string;
     personalLicenseEmailFile?: string;
     personalLicensePasswordFile?: string;

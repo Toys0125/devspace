@@ -335,6 +335,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
       unityHubExecutable: env.DEVSPACE_UNITY_HUB_EXECUTABLE?.trim()
         || files.config.unity?.unityHubExecutable?.trim()
         || "unityhub",
+      xvfbExecutable: parseOptionalUnityExecutable(
+        env.DEVSPACE_UNITY_XVFB_EXECUTABLE
+          ?? files.config.unity?.xvfbExecutable
+          ?? (process.platform === "linux" ? "xvfb-run" : undefined),
+      ),
       personalLicenseFile: resolveOptionalPath(
         env.DEVSPACE_UNITY_PERSONAL_LICENSE_FILE ?? files.config.unity?.personalLicenseFile,
       ),
@@ -348,6 +353,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     },
     logging: parseLoggingConfig(env),
   };
+}
+
+function parseOptionalUnityExecutable(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed || trimmed.toLowerCase() === "none") return undefined;
+  return trimmed;
 }
 
 function resolveOptionalPath(value: string | undefined): string | undefined {

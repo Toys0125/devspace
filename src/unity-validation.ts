@@ -34,6 +34,7 @@ export interface UnityRunnerConfig {
   editorInstaller: UnityEditorInstaller;
   unityCliExecutable: string;
   unityHubExecutable: string;
+  xvfbExecutable?: string;
   personalLicenseFile?: string;
   personalLicenseEmailFile?: string;
   personalLicensePasswordFile?: string;
@@ -168,7 +169,7 @@ export class UnityValidationRunner {
   private activeJobs = 0;
   private shuttingDown = false;
   private personalLicenseActivated = false;
-  private personalLicenseActivation?: Promise<boolean>;
+  private personalLicenseActivation?: Promise<"existing" | "activated" | "failed">;
 
   constructor(
     private readonly config: UnityRunnerConfig,
@@ -265,6 +266,7 @@ export class UnityValidationRunner {
     editorRoots: string[];
     autoInstallEditors: boolean;
     editorInstaller: UnityEditorInstaller;
+    xvfbExecutable?: string;
     installingEditorVersions: string[];
   } {
     return {
@@ -275,6 +277,7 @@ export class UnityValidationRunner {
       editorRoots: [...this.config.editorRoots],
       autoInstallEditors: this.config.autoInstallEditors,
       editorInstaller: this.config.editorInstaller,
+      xvfbExecutable: this.config.xvfbExecutable,
       installingEditorVersions: [...this.editorInstallPromises.keys()].sort(),
     };
   }
@@ -882,9 +885,9 @@ export class UnityValidationRunner {
     if (this.personalLicenseActivated) return true;
 
     if (!this.personalLicenseActivation) {
-      this.personalLicenseActivation = this.activatePersonalLicense(editorPath, licenseFile, emailFile, passwordFile)
+      this.personalLicenseActivation = this.preparePersonalLicense(editorPath, licenseFile, emailFile, passwordFile)
         .then((result) => {
-          this.personalLicenseActivated = result;
+          this.personalLicenseActivated = result !== "failed";
           return result;
         })
         .finally(() => {
@@ -893,24 +896,63 @@ export class UnityValidationRunner {
     }
 
     const startedAt = Date.now();
-    const activated = await this.personalLicenseActivation;
+    const result = await this.personalLicenseActivation;
+    const ready = result !== "failed";
     const step: UnityValidationStep = {
-      name: "license-activation",
-      status: activated ? "passed" : "failed",
+      name: result === "existing" ? "license-check" : "license-activation",
+      status: ready ? "passed" : "failed",
       durationSeconds: roundSeconds(Date.now() - startedAt),
-      failureCategory: activated ? undefined : "INFRASTRUCTURE_FAILURE",
-      failureCode: activated ? undefined : "UNITY_LICENSE_ACTIVATION_FAILED",
-      message: activated
-        ? "Unity Personal license activation completed using file-backed credentials."
-        : "Unity Personal license activation failed using the configured file-backed credentials.",
+      failureCategory: ready ? undefined : "INFRASTRUCTURE_FAILURE",
+      failureCode: ready ? undefined : "UNITY_LICENSE_ACTIVATION_FAILED",
+      message: result === "existing"
+        ? "Existing Unity Personal license is valid for this worker."
+        : result === "activated"
+          ? "Unity Personal license activation completed using file-backed credentials."
+          : "Unity Personal license activation failed using the configured file-backed credentials.",
     };
     job.summary.steps.push(step);
-    if (!activated) {
+    if (!ready) {
       await this.fail(job, "INFRASTRUCTURE_FAILURE", "UNITY_LICENSE_ACTIVATION_FAILED", step.message!);
       return false;
     }
     await this.persistSummary(job);
     return true;
+  }
+
+  private async preparePersonalLicense(
+    editorPath: string,
+    licenseFile: string,
+    emailFile: string,
+    passwordFile: string,
+  ): Promise<"existing" | "activated" | "failed"> {
+    if (await this.hasUsablePersonalLicense(editorPath)) return "existing";
+    return await this.activatePersonalLicense(editorPath, licenseFile, emailFile, passwordFile)
+      ? "activated"
+      : "failed";
+  }
+
+  private async hasUsablePersonalLicense(editorPath: string): Promise<boolean> {
+    const blankProject = join(this.config.stateDir, "license-activation", "BlankProject");
+    await mkdir(join(blankProject, "Assets"), { recursive: true });
+    const editorArgs = [
+      "-batchmode",
+      ...(this.config.xvfbExecutable ? [] : ["-nographics"]),
+      "-quit",
+      "-projectPath",
+      blankProject,
+      "-logFile",
+      "-",
+    ];
+    const invocation = buildUnityEditorInvocation(editorPath, editorArgs, this.config.xvfbExecutable);
+    const result = await runProcess(
+      invocation.command,
+      invocation.args,
+      blankProject,
+      undefined,
+      this.config.jobTimeoutSeconds * 1_000,
+      this.editorInstallerAbortController.signal,
+    );
+    return !result.cancelled && !result.timedOut && result.exitCode === 0;
   }
 
   private async activatePersonalLicense(
@@ -948,23 +990,25 @@ export class UnityValidationRunner {
     try {
       let delayMs = 15_000;
       for (let attempt = 0; attempt < 5; attempt += 1) {
+        const editorArgs = [
+          "-batchmode",
+          ...(this.config.xvfbExecutable ? [] : ["-nographics"]),
+          "-quit",
+          "-serial",
+          serial,
+          "-username",
+          email,
+          "-password",
+          password,
+          "-projectPath",
+          blankProject,
+          "-logFile",
+          "-",
+        ];
+        const invocation = buildUnityEditorInvocation(editorPath, editorArgs, this.config.xvfbExecutable);
         const result = await runProcess(
-          editorPath,
-          [
-            "-batchmode",
-            "-nographics",
-            "-quit",
-            "-serial",
-            serial,
-            "-username",
-            email,
-            "-password",
-            password,
-            "-projectPath",
-            blankProject,
-            "-logFile",
-            "-",
-          ],
+          invocation.command,
+          invocation.args,
           blankProject,
           undefined,
           this.config.jobTimeoutSeconds * 1_000,
@@ -999,9 +1043,18 @@ export class UnityValidationRunner {
     resultFile?: string,
   ): Promise<boolean> {
     const logName = `${name}.log`;
-    const args = ["-batchmode", ...(nographics ? ["-nographics"] : []), "-projectPath", projectPath, ...extraArgs, "-logFile", join(job.summary.artifactsDir, logName)];
+    const editorArgs = [
+      "-batchmode",
+      ...(nographics && !this.config.xvfbExecutable ? ["-nographics"] : []),
+      "-projectPath",
+      projectPath,
+      ...extraArgs,
+      "-logFile",
+      join(job.summary.artifactsDir, logName),
+    ];
+    const invocation = buildUnityEditorInvocation(editorPath, editorArgs, this.config.xvfbExecutable);
     const startedAt = Date.now();
-    const result = await this.runCommand(job, logName, editorPath, args, projectPath, true);
+    const result = await this.runCommand(job, logName, invocation.command, invocation.args, projectPath, true);
     const step: UnityValidationStep = {
       name,
       status: result.cancelled ? "cancelled" : result.exitCode === 0 && !result.timedOut ? "passed" : "failed",
@@ -1158,6 +1211,18 @@ export async function readUnityVersion(projectPath: string): Promise<string> {
   return (await readUnityEditorIdentity(projectPath)).version;
 }
 
+export function buildUnityEditorInvocation(
+  editorPath: string,
+  editorArgs: string[],
+  xvfbExecutable?: string,
+): { command: string; args: string[] } {
+  if (!xvfbExecutable) return { command: editorPath, args: editorArgs };
+  return {
+    command: xvfbExecutable,
+    args: ["-a", "--server-args=-screen 0 640x480x24", editorPath, ...editorArgs],
+  };
+}
+
 export async function findUnityEditor(version: string, roots: string[]): Promise<string | undefined> {
   for (const root of roots) {
     for (const candidate of [
@@ -1184,6 +1249,7 @@ export function extractUnityPersonalSerial(license: string): string {
 }
 
 export function classifyUnityInfrastructureFailure(log: string): string | undefined {
+  if (/spawn\s+\S*xvfb\S*\s+ENOENT/i.test(log)) return "UNITY_XVFB_MISSING";
   if (
     /No valid Unity Editor license/i.test(log)
     || /'com\.unity\.editor\.headless' was not found/i.test(log)

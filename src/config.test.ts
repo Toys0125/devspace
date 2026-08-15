@@ -36,6 +36,7 @@ assert.equal(loadConfig(baseEnv).unity.editorInstallTimeoutSeconds, 2 * 60 * 60)
 assert.equal(loadConfig(baseEnv).unity.editorInstaller, "unity-cli");
 assert.equal(loadConfig(baseEnv).unity.unityCliExecutable, "unity");
 assert.equal(loadConfig(baseEnv).unity.unityHubExecutable, "unityhub");
+assert.equal(loadConfig(baseEnv).unity.xvfbExecutable, process.platform === "linux" ? "xvfb-run" : undefined);
 assert.equal(loadConfig(baseEnv).unity.personalLicenseFile, undefined);
 assert.equal(loadConfig(baseEnv).unity.personalLicenseEmailFile, undefined);
 assert.equal(loadConfig(baseEnv).unity.personalLicensePasswordFile, undefined);
@@ -87,6 +88,11 @@ assert.equal(
   loadConfig({ ...baseEnv, DEVSPACE_UNITY_HUB_EXECUTABLE: "/opt/unityhub" }).unity.unityHubExecutable,
   "/opt/unityhub",
 );
+assert.equal(
+  loadConfig({ ...baseEnv, DEVSPACE_UNITY_XVFB_EXECUTABLE: "/opt/xvfb-run" }).unity.xvfbExecutable,
+  "/opt/xvfb-run",
+);
+assert.equal(loadConfig({ ...baseEnv, DEVSPACE_UNITY_XVFB_EXECUTABLE: "none" }).unity.xvfbExecutable, undefined);
 assert.equal(
   loadConfig({ ...baseEnv, DEVSPACE_UNITY_PERSONAL_LICENSE_FILE: "/run/secrets/unity_license" }).unity.personalLicenseFile,
   "/run/secrets/unity_license",

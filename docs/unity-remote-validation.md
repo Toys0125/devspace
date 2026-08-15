@@ -157,6 +157,13 @@ RUN npm run build \
 
 FROM <your-unity-server-base-image>
 
+# Linux Unity Editor validation needs a virtual X display. Unity's Input System
+# can query GTK/X11 state even in batch mode; DevSpace therefore defaults to
+# xvfb-run on Linux and runs the Editor with graphics enabled inside Xvfb.
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xvfb xauth \
+ && rm -rf /var/lib/apt/lists/*
+
 # Unity's standalone CLI is currently distributed from the beta channel.
 # Install it outside /root so a persistent /root volume cannot pin an old CLI.
 RUN curl -fsSL https://public-cdn.cloud.unity3d.com/hub/prod/cli/install.sh \
@@ -180,6 +187,14 @@ Rebuild/recreate the Unity-Server container whenever the custom DevSpace package
 changes. Merely restarting a container built with the upstream npm release will
 not pick up fork changes.
 
+On Linux, `DEVSPACE_UNITY_XVFB_EXECUTABLE` defaults to `xvfb-run`. When enabled,
+DevSpace wraps Editor activation/compile/test/build invocations in an automatically
+allocated Xvfb display and intentionally omits `-nographics`; the virtual display
+uses software rendering when no GPU is exposed. Set the variable to `none` only
+when the project is known to be safe under true headless Editor execution. If
+`xvfb-run` is missing, validation reports `UNITY_XVFB_MISSING` instead of relying
+on an opaque Editor crash.
+
 ### Unity Personal activation with file-backed credentials
 
 DevSpace can reproduce GameCI's Personal-license activation flow without placing
@@ -195,9 +210,13 @@ DEVSPACE_UNITY_PERSONAL_PASSWORD_FILE=/run/secrets/unity_password
 The worker reads `DeveloperData` from the `.ulf`, base64-decodes the embedded
 27-character Personal serial using the same format used by GameCI, and invokes
 the selected Unity Editor with `-serial`, `-username`, and `-password` against a
-worker-owned blank project. Activation is serialized/shared within the worker
-process and retried up to five times with exponential backoff. Credential and
-serial contents are not copied into validation receipts or job artifacts.
+worker-owned blank project. Before exposing credentials to the Editor, the worker
+first launches that blank project without credentials to verify whether an existing
+server-bound license is already usable. Successful persistent licenses therefore
+survive worker/container restarts without repeating credential-based activation.
+Only when that check fails is activation serialized/shared within the worker process
+and retried up to five times with exponential backoff. Credential and serial
+contents are not copied into validation receipts or job artifacts.
 
 The Unity Editor activation interface requires these values as process
 arguments, so they can briefly be visible to sufficiently privileged processes

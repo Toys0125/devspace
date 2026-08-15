@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import {
+  buildUnityEditorInvocation,
   classifyUnityCompileFailure,
   classifyUnityInfrastructureFailure,
   extractUnityPersonalSerial,
@@ -84,10 +85,19 @@ const commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, enc
 assert.equal(await readUnityVersion(unityProject), version);
 assert.deepEqual(await readUnityEditorIdentity(unityProject), { version, changeset });
 assert.equal(await findUnityEditor(version, [editorRoot]), editor);
+assert.deepEqual(buildUnityEditorInvocation(editor, ["-batchmode"], undefined), {
+  command: editor,
+  args: ["-batchmode"],
+});
+assert.deepEqual(buildUnityEditorInvocation(editor, ["-batchmode"], "xvfb-run"), {
+  command: "xvfb-run",
+  args: ["-a", "--server-args=-screen 0 640x480x24", editor, "-batchmode"],
+});
 assert.equal(classifyUnityInfrastructureFailure("No valid Unity Editor license"), "UNITY_LICENSE_FAILURE");
 assert.equal(classifyUnityInfrastructureFailure("Legacy MachineBinding validation failed"), "UNITY_LICENSE_FAILURE");
 assert.equal(classifyUnityInfrastructureFailure("Successfully connected to LicensingClient"), undefined);
 assert.equal(classifyUnityInfrastructureFailure("Access token is unavailable; failed to update"), undefined);
+assert.equal(classifyUnityInfrastructureFailure("Error: spawn xvfb-run ENOENT"), "UNITY_XVFB_MISSING");
 assert.equal(classifyUnityInfrastructureFailure("write failed: No space left on device"), "DISK_FULL");
 assert.equal(classifyUnityInfrastructureFailure("Assets imported successfully"), undefined);
 assert.equal(classifyUnityCompileFailure("Assets/Foo.cs(1,1): error CS1002: ; expected"), "UNITY_COMPILATION_FAILED");
