@@ -335,10 +335,24 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
       unityHubExecutable: env.DEVSPACE_UNITY_HUB_EXECUTABLE?.trim()
         || files.config.unity?.unityHubExecutable?.trim()
         || "unityhub",
+      personalLicenseFile: resolveOptionalPath(
+        env.DEVSPACE_UNITY_PERSONAL_LICENSE_FILE ?? files.config.unity?.personalLicenseFile,
+      ),
+      personalLicenseEmailFile: resolveOptionalPath(
+        env.DEVSPACE_UNITY_PERSONAL_EMAIL_FILE ?? files.config.unity?.personalLicenseEmailFile,
+      ),
+      personalLicensePasswordFile: resolveOptionalPath(
+        env.DEVSPACE_UNITY_PERSONAL_PASSWORD_FILE ?? files.config.unity?.personalLicensePasswordFile,
+      ),
       allowedRepositoryPrefixes: selectedUnityAllowedRepositories,
     },
     logging: parseLoggingConfig(env),
   };
+}
+
+function resolveOptionalPath(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? resolve(expandHomePath(trimmed)) : undefined;
 }
 
 function numberConfigValue(value: number | undefined): string | undefined {

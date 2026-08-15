@@ -36,6 +36,9 @@ assert.equal(loadConfig(baseEnv).unity.editorInstallTimeoutSeconds, 2 * 60 * 60)
 assert.equal(loadConfig(baseEnv).unity.editorInstaller, "unity-cli");
 assert.equal(loadConfig(baseEnv).unity.unityCliExecutable, "unity");
 assert.equal(loadConfig(baseEnv).unity.unityHubExecutable, "unityhub");
+assert.equal(loadConfig(baseEnv).unity.personalLicenseFile, undefined);
+assert.equal(loadConfig(baseEnv).unity.personalLicenseEmailFile, undefined);
+assert.equal(loadConfig(baseEnv).unity.personalLicensePasswordFile, undefined);
 assert.throws(
   () => loadConfig({ ...baseEnv, DEVSPACE_UNITY_RUNNER: "1" }),
   /DEVSPACE_UNITY_RUNNER requires DEVSPACE_UNITY_ALLOWED_REPOSITORIES/,
@@ -83,6 +86,18 @@ assert.equal(
 assert.equal(
   loadConfig({ ...baseEnv, DEVSPACE_UNITY_HUB_EXECUTABLE: "/opt/unityhub" }).unity.unityHubExecutable,
   "/opt/unityhub",
+);
+assert.equal(
+  loadConfig({ ...baseEnv, DEVSPACE_UNITY_PERSONAL_LICENSE_FILE: "/run/secrets/unity_license" }).unity.personalLicenseFile,
+  "/run/secrets/unity_license",
+);
+assert.equal(
+  loadConfig({ ...baseEnv, DEVSPACE_UNITY_PERSONAL_EMAIL_FILE: "/run/secrets/unity_email" }).unity.personalLicenseEmailFile,
+  "/run/secrets/unity_email",
+);
+assert.equal(
+  loadConfig({ ...baseEnv, DEVSPACE_UNITY_PERSONAL_PASSWORD_FILE: "/run/secrets/unity_password" }).unity.personalLicensePasswordFile,
+  "/run/secrets/unity_password",
 );
 assert.deepEqual(
   loadConfig({ ...baseEnv, DEVSPACE_UNITY_EDITOR_ROOTS: "/unity/a,/unity/b" }).unity.editorRoots,

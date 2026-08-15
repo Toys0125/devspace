@@ -34,6 +34,9 @@ export interface UnityRunnerConfig {
   editorInstaller: UnityEditorInstaller;
   unityCliExecutable: string;
   unityHubExecutable: string;
+  personalLicenseFile?: string;
+  personalLicenseEmailFile?: string;
+  personalLicensePasswordFile?: string;
   allowedRepositoryPrefixes: string[];
 }
 
@@ -164,6 +167,8 @@ export class UnityValidationRunner {
   private readonly freeSlots: number[];
   private activeJobs = 0;
   private shuttingDown = false;
+  private personalLicenseActivated = false;
+  private personalLicenseActivation?: Promise<boolean>;
 
   constructor(
     private readonly config: UnityRunnerConfig,
@@ -386,6 +391,7 @@ export class UnityValidationRunner {
       const editorPath = await this.resolveUnityEditor(job, editorIdentity);
       if (!editorPath || job.summary.status !== "running") return;
       job.summary.editorPath = editorPath;
+      if (!(await this.ensurePersonalLicense(job, editorPath))) return;
 
       const profileName = job.summary.profile;
       const profile = projectConfig.profiles?.[profileName] ?? DEFAULT_PROFILES[profileName];
@@ -859,6 +865,105 @@ export class UnityValidationRunner {
     }
   }
 
+  private async ensurePersonalLicense(job: InternalJob, editorPath: string): Promise<boolean> {
+    const licenseFile = this.config.personalLicenseFile;
+    const emailFile = this.config.personalLicenseEmailFile;
+    const passwordFile = this.config.personalLicensePasswordFile;
+    if (!licenseFile && !emailFile && !passwordFile) return true;
+    if (!licenseFile || !emailFile || !passwordFile) {
+      await this.fail(
+        job,
+        "INFRASTRUCTURE_FAILURE",
+        "UNITY_LICENSE_CREDENTIALS_INCOMPLETE",
+        "Unity Personal activation requires license, email, and password file paths.",
+      );
+      return false;
+    }
+    if (this.personalLicenseActivated) return true;
+
+    if (!this.personalLicenseActivation) {
+      this.personalLicenseActivation = this.activatePersonalLicense(editorPath, licenseFile, emailFile, passwordFile)
+        .then((result) => {
+          this.personalLicenseActivated = result;
+          return result;
+        })
+        .finally(() => {
+          this.personalLicenseActivation = undefined;
+        });
+    }
+
+    const startedAt = Date.now();
+    const activated = await this.personalLicenseActivation;
+    const step: UnityValidationStep = {
+      name: "license-activation",
+      status: activated ? "passed" : "failed",
+      durationSeconds: roundSeconds(Date.now() - startedAt),
+      failureCategory: activated ? undefined : "INFRASTRUCTURE_FAILURE",
+      failureCode: activated ? undefined : "UNITY_LICENSE_ACTIVATION_FAILED",
+      message: activated
+        ? "Unity Personal license activation completed using file-backed credentials."
+        : "Unity Personal license activation failed using the configured file-backed credentials.",
+    };
+    job.summary.steps.push(step);
+    if (!activated) {
+      await this.fail(job, "INFRASTRUCTURE_FAILURE", "UNITY_LICENSE_ACTIVATION_FAILED", step.message!);
+      return false;
+    }
+    await this.persistSummary(job);
+    return true;
+  }
+
+  private async activatePersonalLicense(
+    editorPath: string,
+    licenseFile: string,
+    emailFile: string,
+    passwordFile: string,
+  ): Promise<boolean> {
+    let serial: string;
+    let email: string;
+    let password: string;
+    try {
+      serial = extractUnityPersonalSerial(await readFile(licenseFile, "utf8"));
+      email = (await readFile(emailFile, "utf8")).trim();
+      password = (await readFile(passwordFile, "utf8")).replace(/[\r\n]+$/, "");
+    } catch {
+      return false;
+    }
+    if (!email || !password || email.includes("\0") || password.includes("\0")) return false;
+
+    const blankProject = join(this.config.stateDir, "license-activation", "BlankProject");
+    await mkdir(join(blankProject, "Assets"), { recursive: true });
+    let delayMs = 15_000;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const result = await runProcess(
+        editorPath,
+        [
+          "-batchmode",
+          "-nographics",
+          "-quit",
+          "-serial",
+          serial,
+          "-username",
+          email,
+          "-password",
+          password,
+          "-projectPath",
+          blankProject,
+          "-logFile",
+          "-",
+        ],
+        blankProject,
+        undefined,
+        this.config.jobTimeoutSeconds * 1_000,
+        this.editorInstallerAbortController.signal,
+      );
+      if (!result.cancelled && !result.timedOut && result.exitCode === 0) return true;
+      if (attempt < 4) await new Promise((resolveDelay) => setTimeout(resolveDelay, delayMs));
+      delayMs *= 2;
+    }
+    return false;
+  }
+
   private async runUnityStep(
     job: InternalJob,
     editorPath: string,
@@ -1041,6 +1146,17 @@ export async function findUnityEditor(version: string, roots: string[]): Promise
     }
   }
   return undefined;
+}
+
+export function extractUnityPersonalSerial(license: string): string {
+  const encoded = license.match(/<DeveloperData\s+Value=["']([^"']+)["']\s*\/>/i)?.[1];
+  if (!encoded) throw new Error("Unity license file does not contain DeveloperData.");
+  const decoded = Buffer.from(encoded, "base64").toString("latin1");
+  const serial = decoded.slice(4);
+  if (serial.length !== 27 || /[\r\n\0]/.test(serial)) {
+    throw new Error("Unity Personal serial extracted from DeveloperData is invalid.");
+  }
+  return serial;
 }
 
 export function classifyUnityInfrastructureFailure(log: string): string | undefined {

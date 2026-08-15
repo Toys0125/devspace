@@ -6,6 +6,7 @@ import { execFileSync } from "node:child_process";
 import {
   classifyUnityCompileFailure,
   classifyUnityInfrastructureFailure,
+  extractUnityPersonalSerial,
   findUnityEditor,
   parseUnityTestFailureCount,
   readUnityEditorIdentity,
@@ -91,6 +92,10 @@ assert.equal(classifyUnityCompileFailure("Compilation finished successfully"), u
 assert.equal(parseUnityTestFailureCount('<test-run total="3" passed="2" failed="1" />'), 1);
 assert.equal(parseUnityTestFailureCount('<test-run><test-case result="Failed" /><test-case result="Passed" /></test-run>'), 1);
 assert.equal(parseUnityTestFailureCount("<test-run>truncated"), undefined);
+const syntheticPersonalSerial = "F4-ABCD-EFGH-IJKL-MNOP-QRST";
+const developerData = Buffer.from(`junk${syntheticPersonalSerial}`, "latin1").toString("base64");
+assert.equal(extractUnityPersonalSerial(`<DeveloperData Value="${developerData}"/>`), syntheticPersonalSerial);
+assert.throws(() => extractUnityPersonalSerial("<root />"), /DeveloperData/);
 assert.deepEqual(redactRemoteUrl("https://user:secret@example.com/org/repo.git"), {
   repositoryUrl: "https://example.com/org/repo.git",
   credentialsRedacted: true,

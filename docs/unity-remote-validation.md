@@ -180,6 +180,54 @@ Rebuild/recreate the Unity-Server container whenever the custom DevSpace package
 changes. Merely restarting a container built with the upstream npm release will
 not pick up fork changes.
 
+### Unity Personal activation with file-backed credentials
+
+DevSpace can reproduce GameCI's Personal-license activation flow without placing
+account credentials directly in environment variables. Configure all three file
+paths together:
+
+```text
+DEVSPACE_UNITY_PERSONAL_LICENSE_FILE=/root/.local/share/unity3d/Unity/Unity_lic.ulf
+DEVSPACE_UNITY_PERSONAL_EMAIL_FILE=/run/secrets/unity_email
+DEVSPACE_UNITY_PERSONAL_PASSWORD_FILE=/run/secrets/unity_password
+```
+
+The worker reads `DeveloperData` from the `.ulf`, base64-decodes the embedded
+27-character Personal serial using the same format used by GameCI, and invokes
+the selected Unity Editor with `-serial`, `-username`, and `-password` against a
+worker-owned blank project. Activation is serialized/shared within the worker
+process and retried up to five times with exponential backoff. Credential and
+serial contents are not copied into validation receipts or job artifacts.
+
+The Unity Editor activation interface requires these values as process
+arguments, so they can briefly be visible to sufficiently privileged processes
+inside the container. File-backed configuration prevents them from being stored
+in the Compose environment or normal DevSpace logs, but cannot remove that Unity
+Editor limitation.
+
+A Docker Compose configuration can use secrets:
+
+```yaml
+services:
+  unity-base-server:
+    environment:
+      DEVSPACE_UNITY_PERSONAL_LICENSE_FILE: /root/.local/share/unity3d/Unity/Unity_lic.ulf
+      DEVSPACE_UNITY_PERSONAL_EMAIL_FILE: /run/secrets/unity_email
+      DEVSPACE_UNITY_PERSONAL_PASSWORD_FILE: /run/secrets/unity_password
+    secrets:
+      - unity_email
+      - unity_password
+
+secrets:
+  unity_email:
+    file: ./secrets/unity_email
+  unity_password:
+    file: ./secrets/unity_password
+```
+
+Keep `/root` and the Unity runner state persistent so the server-specific
+license state produced by a successful activation survives container rebuilds.
+
 ## Git transport
 
 The source agent must ensure that the exact commit SHA is reachable through the

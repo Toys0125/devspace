@@ -32,6 +32,9 @@ export interface DevspaceUserConfig {
     editorInstaller?: "unity-cli" | "hub";
     unityCliExecutable?: string;
     unityHubExecutable?: string;
+    personalLicenseFile?: string;
+    personalLicenseEmailFile?: string;
+    personalLicensePasswordFile?: string;
     allowedRepositoryPrefixes?: string[];
     allowAnyRepository?: boolean;
   };
