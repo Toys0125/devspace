@@ -33,6 +33,7 @@ export interface DevspaceUserConfig {
     unityCliExecutable?: string;
     unityHubExecutable?: string;
     xvfbExecutable?: string;
+    sharedUpmCacheRoot?: string;
     personalLicenseFile?: string;
     personalLicenseEmailFile?: string;
     personalLicensePasswordFile?: string;

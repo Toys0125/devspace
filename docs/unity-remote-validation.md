@@ -35,7 +35,10 @@ When `DEVSPACE_UNITY_RUNNER=1`, the worker additionally exposes:
 The worker maintains persistent bare Git mirrors and isolated validation slots.
 Each repository/slot pair preserves only the ignored Unity `Library/` directory
 between jobs; other generated/untracked state is cleaned before the next exact
-commit is checked out.
+commit is checked out. Separately, all Unity Editor launches share one runner-owned
+Package Manager cache. This cross-project cache contains registry/package data and
+Git-LFS package content only; project import artifacts remain inside each isolated
+`Library/`.
 
 Artifacts for every job include `summary.json` plus Git/Unity logs and Unity
 Test Framework XML when tests run.
@@ -54,6 +57,7 @@ DEVSPACE_UNITY_AUTO_INSTALL_EDITORS=1
 DEVSPACE_UNITY_EDITOR_INSTALL_TIMEOUT_SECONDS=7200
 DEVSPACE_UNITY_EDITOR_INSTALLER=unity-cli
 DEVSPACE_UNITY_CLI_EXECUTABLE=unity
+DEVSPACE_UNITY_SHARED_UPM_CACHE_ROOT=/root/.local/share/devspace/unity-runner/shared-cache/upm
 DEVSPACE_UNITY_ALLOWED_REPOSITORIES=https://github.com/BasisVR/,https://github.com/Toys0125/
 ```
 
@@ -87,6 +91,22 @@ or installer failures, and a reported-success-but-missing Editor remain
 `INFRASTRUCTURE_FAILURE`; they are never treated as source failures. Automatic
 installation is disabled by default because Editor downloads are large and
 consume network/disk resources.
+
+### Shared Package Manager cache
+
+`DEVSPACE_UNITY_SHARED_UPM_CACHE_ROOT` defaults to
+`<DEVSPACE_UNITY_STATE_DIR>/shared-cache/upm`. DevSpace supplies that path as
+`UPM_CACHE_ROOT` to every Unity Editor process and enables the Package Manager's
+Git-LFS cache at `<root>/git-lfs`. Because the location lives outside repository
+slots, packages downloaded while validating one project can be reused by another
+project or another validation slot. Set the variable to `none` to opt out.
+
+This cache is intentionally narrower than Unity `Library/`. DevSpace does not
+share `Library/ArtifactDB`, imported asset outputs, script assemblies, shader
+artifacts, or other project-local import state between unrelated projects. Those
+need project isolation or a content-addressed service such as Unity Accelerator;
+directly reusing another project's `Library` would risk stale or incorrect import
+results.
 
 ## Project configuration
 

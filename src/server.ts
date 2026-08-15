@@ -1951,6 +1951,7 @@ if (await isMainModule()) {
         : config.unity.unityHubExecutable;
       console.log(`unity editor auto-install: ${config.unity.autoInstallEditors ? `enabled via ${config.unity.editorInstaller} (${editorInstallerExecutable})` : "disabled"}`);
       console.log(`unity virtual display: ${config.unity.xvfbExecutable ? `enabled via ${config.unity.xvfbExecutable} (graphics mode)` : "disabled"}`);
+      console.log(`unity shared UPM cache: ${config.unity.sharedUpmCacheRoot ?? "disabled"}`);
     }
     if (config.subagents) {
       console.log(`subagent providers: ${formatLocalAgentProviderAvailabilitySummary(localAgentProviders)}`);

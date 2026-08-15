@@ -340,6 +340,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
           ?? files.config.unity?.xvfbExecutable
           ?? (process.platform === "linux" ? "xvfb-run" : undefined),
       ),
+      sharedUpmCacheRoot: resolveOptionalUnityCachePath(
+        env.DEVSPACE_UNITY_SHARED_UPM_CACHE_ROOT
+          ?? files.config.unity?.sharedUpmCacheRoot
+          ?? join(unityStateDir, "shared-cache", "upm"),
+      ),
       personalLicenseFile: resolveOptionalPath(
         env.DEVSPACE_UNITY_PERSONAL_LICENSE_FILE ?? files.config.unity?.personalLicenseFile,
       ),
@@ -359,6 +364,12 @@ function parseOptionalUnityExecutable(value: string | undefined): string | undef
   const trimmed = value?.trim();
   if (!trimmed || trimmed.toLowerCase() === "none") return undefined;
   return trimmed;
+}
+
+function resolveOptionalUnityCachePath(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed || trimmed.toLowerCase() === "none") return undefined;
+  return resolve(expandHomePath(trimmed));
 }
 
 function resolveOptionalPath(value: string | undefined): string | undefined {

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import {
   buildUnityEditorInvocation,
+  buildUnitySharedCacheEnvironment,
   classifyUnityCompileFailure,
   classifyUnityInfrastructureFailure,
   extractUnityPersonalSerial,
@@ -105,6 +106,12 @@ assert.equal(classifyUnityCompileFailure("Compilation finished successfully"), u
 assert.equal(parseUnityTestFailureCount('<test-run total="3" passed="2" failed="1" />'), 1);
 assert.equal(parseUnityTestFailureCount('<test-run><test-case result="Failed" /><test-case result="Passed" /></test-run>'), 1);
 assert.equal(parseUnityTestFailureCount("<test-run>truncated"), undefined);
+const sharedCacheEnv = buildUnitySharedCacheEnvironment("/cache/unity/upm", { HOME: "/root" });
+assert.equal(sharedCacheEnv?.HOME, "/root");
+assert.equal(sharedCacheEnv?.UPM_CACHE_ROOT, "/cache/unity/upm");
+assert.equal(sharedCacheEnv?.UPM_ENABLE_GIT_LFS_CACHE, "1");
+assert.equal(sharedCacheEnv?.UPM_GIT_LFS_CACHE_PATH, "/cache/unity/upm/git-lfs");
+assert.equal(buildUnitySharedCacheEnvironment(undefined, { HOME: "/root" }), undefined);
 const syntheticPersonalSerial = "F4-ABCD-EFGH-IJKL-MNOP-QRST";
 const developerData = Buffer.from(`junk${syntheticPersonalSerial}`, "latin1").toString("base64");
 assert.equal(extractUnityPersonalSerial(`<DeveloperData Value="${developerData}"/>`), syntheticPersonalSerial);

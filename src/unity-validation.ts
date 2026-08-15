@@ -35,6 +35,7 @@ export interface UnityRunnerConfig {
   unityCliExecutable: string;
   unityHubExecutable: string;
   xvfbExecutable?: string;
+  sharedUpmCacheRoot?: string;
   personalLicenseFile?: string;
   personalLicenseEmailFile?: string;
   personalLicensePasswordFile?: string;
@@ -267,6 +268,7 @@ export class UnityValidationRunner {
     autoInstallEditors: boolean;
     editorInstaller: UnityEditorInstaller;
     xvfbExecutable?: string;
+    sharedUpmCacheRoot?: string;
     installingEditorVersions: string[];
   } {
     return {
@@ -278,6 +280,7 @@ export class UnityValidationRunner {
       autoInstallEditors: this.config.autoInstallEditors,
       editorInstaller: this.config.editorInstaller,
       xvfbExecutable: this.config.xvfbExecutable,
+      sharedUpmCacheRoot: this.config.sharedUpmCacheRoot,
       installingEditorVersions: [...this.editorInstallPromises.keys()].sort(),
     };
   }
@@ -944,6 +947,7 @@ export class UnityValidationRunner {
       "-",
     ];
     const invocation = buildUnityEditorInvocation(editorPath, editorArgs, this.config.xvfbExecutable);
+    const environment = await this.prepareUnityProcessEnvironment();
     const result = await runProcess(
       invocation.command,
       invocation.args,
@@ -951,6 +955,8 @@ export class UnityValidationRunner {
       undefined,
       this.config.jobTimeoutSeconds * 1_000,
       this.editorInstallerAbortController.signal,
+      undefined,
+      environment,
     );
     return !result.cancelled && !result.timedOut && result.exitCode === 0;
   }
@@ -1006,6 +1012,7 @@ export class UnityValidationRunner {
           "-",
         ];
         const invocation = buildUnityEditorInvocation(editorPath, editorArgs, this.config.xvfbExecutable);
+        const environment = await this.prepareUnityProcessEnvironment();
         const result = await runProcess(
           invocation.command,
           invocation.args,
@@ -1013,6 +1020,8 @@ export class UnityValidationRunner {
           undefined,
           this.config.jobTimeoutSeconds * 1_000,
           this.editorInstallerAbortController.signal,
+          undefined,
+          environment,
         );
         if (!result.cancelled && !result.timedOut && result.exitCode === 0) {
           activated = !sourceIsActiveLicense || await pathExists(activeLicensePath);
@@ -1053,8 +1062,9 @@ export class UnityValidationRunner {
       join(job.summary.artifactsDir, logName),
     ];
     const invocation = buildUnityEditorInvocation(editorPath, editorArgs, this.config.xvfbExecutable);
+    const environment = await this.prepareUnityProcessEnvironment();
     const startedAt = Date.now();
-    const result = await this.runCommand(job, logName, invocation.command, invocation.args, projectPath, true);
+    const result = await this.runCommand(job, logName, invocation.command, invocation.args, projectPath, true, environment);
     const step: UnityValidationStep = {
       name,
       status: result.cancelled ? "cancelled" : result.exitCode === 0 && !result.timedOut ? "passed" : "failed",
@@ -1140,7 +1150,14 @@ export class UnityValidationRunner {
     return true;
   }
 
-  private async runCommand(job: InternalJob, logName: string, command: string, args: string[], cwd: string, unityOwnsLog = false): Promise<CommandResult> {
+  private async prepareUnityProcessEnvironment(): Promise<NodeJS.ProcessEnv | undefined> {
+    const root = this.config.sharedUpmCacheRoot;
+    if (!root) return undefined;
+    await mkdir(join(root, "git-lfs"), { recursive: true });
+    return buildUnitySharedCacheEnvironment(root);
+  }
+
+  private async runCommand(job: InternalJob, logName: string, command: string, args: string[], cwd: string, unityOwnsLog = false, environment?: NodeJS.ProcessEnv): Promise<CommandResult> {
     if (job.abortController.signal.aborted) return { exitCode: null, timedOut: false, cancelled: true };
     const logPath = join(job.summary.artifactsDir, logName);
     try {
@@ -1154,6 +1171,7 @@ export class UnityValidationRunner {
         (child) => {
           job.child = child;
         },
+        environment,
       );
     } finally {
       job.child = undefined;
@@ -1212,6 +1230,19 @@ export async function readUnityEditorIdentity(projectPath: string): Promise<Unit
 
 export async function readUnityVersion(projectPath: string): Promise<string> {
   return (await readUnityEditorIdentity(projectPath)).version;
+}
+
+export function buildUnitySharedCacheEnvironment(
+  root: string | undefined,
+  baseEnvironment: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv | undefined {
+  if (!root) return undefined;
+  return {
+    ...baseEnvironment,
+    UPM_CACHE_ROOT: root,
+    UPM_ENABLE_GIT_LFS_CACHE: "1",
+    UPM_GIT_LFS_CACHE_PATH: join(root, "git-lfs"),
+  };
 }
 
 export function buildUnityEditorInvocation(
@@ -1366,6 +1397,7 @@ async function runProcess(
   timeoutMs: number,
   signal?: AbortSignal,
   onSpawn?: (child: ChildProcess) => void,
+  environment?: NodeJS.ProcessEnv,
 ): Promise<CommandResult> {
   if (signal?.aborted) return { exitCode: null, timedOut: false, cancelled: true };
   await mkdir(cwd, { recursive: true });
@@ -1406,6 +1438,7 @@ async function runProcess(
 
     child = spawn(command, args, {
       cwd,
+      env: environment,
       stdio: stream ? ["ignore", "pipe", "pipe"] : ["ignore", "ignore", "ignore"],
       windowsHide: true,
     });

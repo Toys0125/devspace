@@ -37,6 +37,7 @@ assert.equal(loadConfig(baseEnv).unity.editorInstaller, "unity-cli");
 assert.equal(loadConfig(baseEnv).unity.unityCliExecutable, "unity");
 assert.equal(loadConfig(baseEnv).unity.unityHubExecutable, "unityhub");
 assert.equal(loadConfig(baseEnv).unity.xvfbExecutable, process.platform === "linux" ? "xvfb-run" : undefined);
+assert.equal(loadConfig(baseEnv).unity.sharedUpmCacheRoot, join(loadConfig(baseEnv).unity.stateDir, "shared-cache", "upm"));
 assert.equal(loadConfig(baseEnv).unity.personalLicenseFile, undefined);
 assert.equal(loadConfig(baseEnv).unity.personalLicenseEmailFile, undefined);
 assert.equal(loadConfig(baseEnv).unity.personalLicensePasswordFile, undefined);
@@ -93,6 +94,11 @@ assert.equal(
   "/opt/xvfb-run",
 );
 assert.equal(loadConfig({ ...baseEnv, DEVSPACE_UNITY_XVFB_EXECUTABLE: "none" }).unity.xvfbExecutable, undefined);
+assert.equal(
+  loadConfig({ ...baseEnv, DEVSPACE_UNITY_SHARED_UPM_CACHE_ROOT: "/cache/unity/upm" }).unity.sharedUpmCacheRoot,
+  "/cache/unity/upm",
+);
+assert.equal(loadConfig({ ...baseEnv, DEVSPACE_UNITY_SHARED_UPM_CACHE_ROOT: "none" }).unity.sharedUpmCacheRoot, undefined);
 assert.equal(
   loadConfig({ ...baseEnv, DEVSPACE_UNITY_PERSONAL_LICENSE_FILE: "/run/secrets/unity_license" }).unity.personalLicenseFile,
   "/run/secrets/unity_license",
