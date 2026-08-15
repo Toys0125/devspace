@@ -202,19 +202,26 @@ account credentials directly in environment variables. Configure all three file
 paths together:
 
 ```text
-DEVSPACE_UNITY_PERSONAL_LICENSE_FILE=/root/.local/share/unity3d/Unity/Unity_lic.ulf
+DEVSPACE_UNITY_PERSONAL_LICENSE_FILE=/run/secrets/unity_license
 DEVSPACE_UNITY_PERSONAL_EMAIL_FILE=/run/secrets/unity_email
 DEVSPACE_UNITY_PERSONAL_PASSWORD_FILE=/run/secrets/unity_password
 ```
+
+Keep the bootstrap `.ulf` separate from Unity's active Linux license path
+(`/root/.local/share/unity3d/Unity/Unity_lic.ulf`). Unity replaces the active
+file with a machine-bound server license after activation; the bootstrap copy
+should remain immutable so it is available if activation is required again.
 
 The worker reads `DeveloperData` from the `.ulf`, base64-decodes the embedded
 27-character Personal serial using the same format used by GameCI, and invokes
 the selected Unity Editor with `-serial`, `-username`, and `-password` against a
 worker-owned blank project. Before exposing credentials to the Editor, the worker
 first launches that blank project without credentials to verify whether an existing
-server-bound license is already usable. Successful persistent licenses therefore
-survive worker/container restarts without repeating credential-based activation.
-Only when that check fails is activation serialized/shared within the worker process
+server-bound license is already usable. Successful persistent licenses survive
+worker restarts without repeating credential-based activation. Container recreation
+also requires a stable Linux machine ID because Unity binds Personal ULF licenses to
+`/etc/machine-id`. Only when the license check fails is activation serialized/shared
+within the worker process
 and retried up to five times with exponential backoff. Credential and serial
 contents are not copied into validation receipts or job artifacts.
 
@@ -230,22 +237,41 @@ A Docker Compose configuration can use secrets:
 services:
   unity-base-server:
     environment:
-      DEVSPACE_UNITY_PERSONAL_LICENSE_FILE: /root/.local/share/unity3d/Unity/Unity_lic.ulf
+      DEVSPACE_UNITY_PERSONAL_LICENSE_FILE: /run/secrets/unity_license
       DEVSPACE_UNITY_PERSONAL_EMAIL_FILE: /run/secrets/unity_email
       DEVSPACE_UNITY_PERSONAL_PASSWORD_FILE: /run/secrets/unity_password
+    volumes:
+      - ./unity_home:/root
+      - ./unity-machine-id:/etc/machine-id:ro
+      - ./unity-machine-id:/var/lib/dbus/machine-id:ro
     secrets:
+      - unity_license
       - unity_email
       - unity_password
 
 secrets:
+  unity_license:
+    file: ./secrets/Unity_lic.ulf
   unity_email:
     file: ./secrets/unity_email
   unity_password:
     file: ./secrets/unity_password
 ```
 
-Keep `/root` and the Unity runner state persistent so the server-specific
-license state produced by a successful activation survives container rebuilds.
+Before recreating an already-activated container, capture its current machine ID
+once on the Docker host:
+
+```bash
+docker exec unity_base_server cat /etc/machine-id > ./unity-machine-id
+chmod 0444 ./unity-machine-id
+```
+
+The file is not an account secret, but it must remain stable. Unity's Linux
+`Legacy.MachineBinding1` and `Legacy.MachineBinding2` use this value; allowing
+Docker to generate a new `/etc/machine-id` on every recreation invalidates the
+persisted `.ulf` and forces credential activation again. Keep both `/root` and
+this machine-ID file persistent so the server-specific license state survives
+container rebuilds.
 
 ## Git transport
 

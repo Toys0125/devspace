@@ -1087,6 +1087,17 @@ export class UnityValidationRunner {
       await this.fail(job, "INFRASTRUCTURE_FAILURE", infrastructure, step.message);
       return false;
     }
+    if (resultFile) {
+      const testResult = await inspectUnityTestResult(resultFile);
+      if (testResult.present && testResult.failed !== undefined && testResult.failed > 0) {
+        step.status = "failed";
+        step.failureCategory = "TEST_FAILURE";
+        step.failureCode = "TESTS_FAILED";
+        step.message = `${testResult.failed} Unity test${testResult.failed === 1 ? "" : "s"} failed.`;
+        await this.fail(job, "TEST_FAILURE", "TESTS_FAILED", step.message);
+        return false;
+      }
+    }
     if (result.exitCode !== 0) {
       const code = `${name.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_FAILED`;
       step.failureCategory = failureCategory;
@@ -1122,14 +1133,6 @@ export class UnityValidationRunner {
         step.failureCode = "TEST_RESULTS_UNPARSEABLE";
         step.message = `Unity produced ${basename(resultFile)}, but its test failure count could not be determined.`;
         await this.fail(job, "TEST_FAILURE", "TEST_RESULTS_UNPARSEABLE", step.message);
-        return false;
-      }
-      if (testResult.failed > 0) {
-        step.status = "failed";
-        step.failureCategory = "TEST_FAILURE";
-        step.failureCode = "TESTS_FAILED";
-        step.message = `${testResult.failed} Unity test${testResult.failed === 1 ? "" : "s"} failed.`;
-        await this.fail(job, "TEST_FAILURE", "TESTS_FAILED", step.message);
         return false;
       }
     }

@@ -205,6 +205,22 @@ assert.equal(malformedResult.failureCode, "TEST_RESULTS_UNPARSEABLE");
 
 writeFileSync(
   editor,
+  normalEditorSource
+    .replace(
+      '<test-run total="1" passed="1" failed="0" />\\n',
+      '<test-run total="3" passed="1" failed="2" />\\n',
+    )
+    .replace("process.exit(0);", 'process.exit(args.includes("-runTests") ? 2 : 0);'),
+);
+const failedTests = await runner.submit({ repositoryUrl: repository, commit, profile: "test" });
+const failedTestsResult = await waitForTerminal(runner, failedTests.jobId);
+assert.equal(failedTestsResult.status, "failed", JSON.stringify(failedTestsResult, null, 2));
+assert.equal(failedTestsResult.failureCategory, "TEST_FAILURE");
+assert.equal(failedTestsResult.failureCode, "TESTS_FAILED");
+assert.match(failedTestsResult.message ?? "", /2 Unity tests failed/);
+
+writeFileSync(
+  editor,
   `#!/usr/bin/env node\nsetTimeout(() => process.exit(0), 5000);\n`,
 );
 chmodSync(editor, 0o755);
