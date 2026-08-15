@@ -704,7 +704,7 @@ export class UnityValidationRunner {
         ? this.config.unityCliExecutable
         : this.config.unityHubExecutable;
       const installPathArgs = useUnityCli
-        ? ["--non-interactive", "--no-pager", "install-path", "--set", installRoot]
+        ? ["--non-interactive", "install-path", "--set", installRoot]
         : ["--headless", "install-path", "--set", installRoot];
       const installPathResult = await runProcess(
         installerExecutable,
@@ -748,7 +748,6 @@ export class UnityValidationRunner {
       const installArgs = useUnityCli
         ? [
             "--non-interactive",
-            "--no-pager",
             "install",
             identity.version,
             ...(identity.changeset ? ["--changeset", identity.changeset] : []),
