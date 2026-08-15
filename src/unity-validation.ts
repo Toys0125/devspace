@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createWriteStream, readdirSync, readFileSync, writeFileSync, type Dirent } from "node:fs";
-import { access, copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -931,37 +931,61 @@ export class UnityValidationRunner {
     }
     if (!email || !password || email.includes("\0") || password.includes("\0")) return false;
 
-    const blankProject = join(this.config.stateDir, "license-activation", "BlankProject");
+    const activationRoot = join(this.config.stateDir, "license-activation");
+    const blankProject = join(activationRoot, "BlankProject");
     await mkdir(join(blankProject, "Assets"), { recursive: true });
-    let delayMs = 15_000;
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      const result = await runProcess(
-        editorPath,
-        [
-          "-batchmode",
-          "-nographics",
-          "-quit",
-          "-serial",
-          serial,
-          "-username",
-          email,
-          "-password",
-          password,
-          "-projectPath",
-          blankProject,
-          "-logFile",
-          "-",
-        ],
-        blankProject,
-        undefined,
-        this.config.jobTimeoutSeconds * 1_000,
-        this.editorInstallerAbortController.signal,
-      );
-      if (!result.cancelled && !result.timedOut && result.exitCode === 0) return true;
-      if (attempt < 4) await new Promise((resolveDelay) => setTimeout(resolveDelay, delayMs));
-      delayMs *= 2;
+
+    const activeLicensePath = join(homedir(), ".local", "share", "unity3d", "Unity", "Unity_lic.ulf");
+    const sourceIsActiveLicense = resolve(licenseFile) === resolve(activeLicensePath);
+    const backupLicensePath = join(activationRoot, "personal-license-source.ulf");
+    if (sourceIsActiveLicense) {
+      await mkdir(activationRoot, { recursive: true });
+      await copyFile(licenseFile, backupLicensePath);
+      await unlink(licenseFile);
     }
-    return false;
+
+    let activated = false;
+    try {
+      let delayMs = 15_000;
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const result = await runProcess(
+          editorPath,
+          [
+            "-batchmode",
+            "-nographics",
+            "-quit",
+            "-serial",
+            serial,
+            "-username",
+            email,
+            "-password",
+            password,
+            "-projectPath",
+            blankProject,
+            "-logFile",
+            "-",
+          ],
+          blankProject,
+          undefined,
+          this.config.jobTimeoutSeconds * 1_000,
+          this.editorInstallerAbortController.signal,
+        );
+        if (!result.cancelled && !result.timedOut && result.exitCode === 0) {
+          activated = !sourceIsActiveLicense || await pathExists(activeLicensePath);
+          if (activated) break;
+        }
+        if (attempt < 4) await new Promise((resolveDelay) => setTimeout(resolveDelay, delayMs));
+        delayMs *= 2;
+      }
+      return activated;
+    } finally {
+      if (sourceIsActiveLicense) {
+        if (!activated && !(await pathExists(activeLicensePath))) {
+          await copyFile(backupLicensePath, activeLicensePath);
+        }
+        await unlink(backupLicensePath).catch(() => undefined);
+      }
+    }
   }
 
   private async runUnityStep(
