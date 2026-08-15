@@ -188,7 +188,7 @@ installed:
 | `DEVSPACE_UNITY_CLI_EXECUTABLE` | `unity` | Standalone Unity CLI executable used by the default installer backend. |
 | `DEVSPACE_UNITY_HUB_EXECUTABLE` | `unityhub` | Deprecated Unity Hub CLI executable used only when `DEVSPACE_UNITY_EDITOR_INSTALLER=hub`. |
 | `DEVSPACE_UNITY_XVFB_EXECUTABLE` | `xvfb-run` on Linux | Wrap Unity Editor launches in a virtual X display. Linux validation runs in graphics mode under Xvfb because some Unity/Input System paths can crash when queried under `-nographics`. Set `none` to disable. |
-| `DEVSPACE_UNITY_SHARED_UPM_CACHE_ROOT` | `<DEVSPACE_UNITY_STATE_DIR>/shared-cache/upm` | Shared cross-project Unity Package Manager cache for registry data, unpacked packages, and Git-LFS package content. Set `none` to disable. Project `Library/` directories remain isolated. |
+| `DEVSPACE_UNITY_SHARED_UPM_CACHE_ROOT` | Unity's per-user global UPM cache | Shared cross-project Unity Package Manager cache for registry data, unpacked packages, and Git-LFS package content. On Linux the default is `~/.cache/Unity/upm`. Set `none` to disable. Project `Library/` directories remain isolated. |
 | `DEVSPACE_UNITY_PERSONAL_LICENSE_FILE` | empty | Optional GameCI-style Personal `.ulf` source. Must be configured together with the email/password file paths. |
 | `DEVSPACE_UNITY_PERSONAL_EMAIL_FILE` | empty | File containing the Unity account email used for Personal activation. |
 | `DEVSPACE_UNITY_PERSONAL_PASSWORD_FILE` | empty | File containing the Unity account password used for Personal activation. Prefer a Docker secret. |

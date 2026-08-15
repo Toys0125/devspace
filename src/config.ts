@@ -343,7 +343,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
       sharedUpmCacheRoot: resolveOptionalUnityCachePath(
         env.DEVSPACE_UNITY_SHARED_UPM_CACHE_ROOT
           ?? files.config.unity?.sharedUpmCacheRoot
-          ?? join(unityStateDir, "shared-cache", "upm"),
+          ?? defaultUnitySharedUpmCacheRoot(env),
       ),
       personalLicenseFile: resolveOptionalPath(
         env.DEVSPACE_UNITY_PERSONAL_LICENSE_FILE ?? files.config.unity?.personalLicenseFile,
@@ -364,6 +364,14 @@ function parseOptionalUnityExecutable(value: string | undefined): string | undef
   const trimmed = value?.trim();
   if (!trimmed || trimmed.toLowerCase() === "none") return undefined;
   return trimmed;
+}
+
+function defaultUnitySharedUpmCacheRoot(env: NodeJS.ProcessEnv): string {
+  if (process.platform === "win32") {
+    return join(env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "Unity", "cache", "upm");
+  }
+  if (process.platform === "darwin") return join(homedir(), "Library", "Caches", "Unity", "upm");
+  return join(homedir(), ".cache", "Unity", "upm");
 }
 
 function resolveOptionalUnityCachePath(value: string | undefined): string | undefined {

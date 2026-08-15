@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "./config.js";
 import { ensureDevspaceDefaultSkills, resolveSubagentsFlag } from "./user-config.js";
@@ -37,7 +37,14 @@ assert.equal(loadConfig(baseEnv).unity.editorInstaller, "unity-cli");
 assert.equal(loadConfig(baseEnv).unity.unityCliExecutable, "unity");
 assert.equal(loadConfig(baseEnv).unity.unityHubExecutable, "unityhub");
 assert.equal(loadConfig(baseEnv).unity.xvfbExecutable, process.platform === "linux" ? "xvfb-run" : undefined);
-assert.equal(loadConfig(baseEnv).unity.sharedUpmCacheRoot, join(loadConfig(baseEnv).unity.stateDir, "shared-cache", "upm"));
+assert.equal(
+  loadConfig(baseEnv).unity.sharedUpmCacheRoot,
+  process.platform === "win32"
+    ? join(process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "Unity", "cache", "upm")
+    : process.platform === "darwin"
+      ? join(homedir(), "Library", "Caches", "Unity", "upm")
+      : join(homedir(), ".cache", "Unity", "upm"),
+);
 assert.equal(loadConfig(baseEnv).unity.personalLicenseFile, undefined);
 assert.equal(loadConfig(baseEnv).unity.personalLicenseEmailFile, undefined);
 assert.equal(loadConfig(baseEnv).unity.personalLicensePasswordFile, undefined);
