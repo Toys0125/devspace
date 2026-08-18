@@ -312,7 +312,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
       ),
       jobTimeoutSeconds: parsePositiveInteger(
         env.DEVSPACE_UNITY_JOB_TIMEOUT_SECONDS ?? numberConfigValue(files.config.unity?.jobTimeoutSeconds),
-        30 * 60,
+        2 * 60 * 60,
         "DEVSPACE_UNITY_JOB_TIMEOUT_SECONDS",
         24 * 60 * 60,
       ),

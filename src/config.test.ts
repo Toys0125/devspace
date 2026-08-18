@@ -30,7 +30,7 @@ assert.equal(loadConfig(baseEnv).artifactsEnabled, false);
 assert.equal(loadConfig(baseEnv).artifactMaxFileBytes, 100 * 1024 * 1024);
 assert.equal(loadConfig(baseEnv).unity.enabled, false);
 assert.equal(loadConfig(baseEnv).unity.maxConcurrentJobs, 1);
-assert.equal(loadConfig(baseEnv).unity.jobTimeoutSeconds, 30 * 60);
+assert.equal(loadConfig(baseEnv).unity.jobTimeoutSeconds, 2 * 60 * 60);
 assert.equal(loadConfig(baseEnv).unity.autoInstallEditors, false);
 assert.equal(loadConfig(baseEnv).unity.editorInstallTimeoutSeconds, 2 * 60 * 60);
 assert.equal(loadConfig(baseEnv).unity.editorInstaller, "unity-cli");

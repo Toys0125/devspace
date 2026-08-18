@@ -181,7 +181,7 @@ installed:
 | `DEVSPACE_UNITY_EDITOR_ROOTS` | `~/Unity/Hub/Editor,/opt/unity/editors` | Comma-separated roots containing versioned Unity editor installs. |
 | `DEVSPACE_UNITY_STATE_DIR` | `<DEVSPACE_STATE_DIR>/unity-runner` | Mirrors, isolated job checkouts, logs, and receipts. |
 | `DEVSPACE_UNITY_MAX_CONCURRENT_JOBS` | `1` | Maximum simultaneous Unity jobs (1-32). |
-| `DEVSPACE_UNITY_JOB_TIMEOUT_SECONDS` | `1800` | Per Git/Unity command timeout. |
+| `DEVSPACE_UNITY_JOB_TIMEOUT_SECONDS` | `7200` | Per Git/Unity command timeout. |
 | `DEVSPACE_UNITY_AUTO_INSTALL_EDITORS` | `0` | Automatically install a missing exact Editor version before validation. |
 | `DEVSPACE_UNITY_EDITOR_INSTALL_TIMEOUT_SECONDS` | `7200` | Timeout for each automatic Editor install operation. |
 | `DEVSPACE_UNITY_EDITOR_INSTALLER` | `unity-cli` | Editor installer backend: `unity-cli` (recommended) or legacy `hub`. |
