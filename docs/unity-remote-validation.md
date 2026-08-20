@@ -129,7 +129,10 @@ defaults to a dry run and refuses `--apply` while a Unity Editor process is dete
 
 Run the migration only while validation jobs are stopped. The script preserves target
 file metadata and flushes the backing filesystem before cloning so OpenZFS does not
-reject dirty source blocks with `EAGAIN`.
+reject dirty source blocks with `EAGAIN`. The scanner indexes files in one Python
+process, filters by Library-relative path and size, and hashes only possible duplicate
+groups in parallel. Use `--jobs N` to tune hashing concurrency; the default is the
+smaller of 8 workers or the detected CPU count.
 
 ## Project configuration
 
