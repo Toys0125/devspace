@@ -66,7 +66,7 @@ def unity_running() -> bool:
         return False
 
 
-def find_libraries(roots: list[Path]) -> list[Path]:
+def scan_root_for_libraries(root: Path) -> set[Path]:
     libraries: set[Path] = set()
     skipped = {
         ".git", ".svn", ".hg", ".cache", ".gradle", ".vs", ".vscode",
@@ -75,45 +75,54 @@ def find_libraries(roots: list[Path]) -> list[Path]:
     }
     max_depth = 4
 
-    for root in roots:
+    try:
         root = root.resolve()
         if not root.is_dir():
+            return libraries
+    except (FileNotFoundError, PermissionError):
+        return libraries
+
+    stack: list[tuple[Path, int]] = [(root, 0)]
+    while stack:
+        current, depth = stack.pop()
+
+        try:
+            is_unity_project = (current / "ProjectSettings" / "ProjectVersion.txt").is_file()
+        except (FileNotFoundError, PermissionError):
+            continue
+        if is_unity_project:
+            library = current / "Library"
+            try:
+                if library.is_dir():
+                    libraries.add(library.resolve())
+            except (FileNotFoundError, PermissionError):
+                pass
             continue
 
-        stack: list[tuple[Path, int]] = [(root, 0)]
-        while stack:
-            current, depth = stack.pop()
+        if depth >= max_depth:
+            continue
 
-            # Check the Unity marker directly from the candidate project root instead
-            # of recursively walking ProjectSettings/Assets/Library trees.
-            try:
-                is_unity_project = (current / "ProjectSettings" / "ProjectVersion.txt").is_file()
-            except PermissionError:
-                continue
-            if is_unity_project:
-                library = current / "Library"
-                try:
-                    if library.is_dir():
-                        libraries.add(library.resolve())
-                except PermissionError:
-                    pass
-                continue
-
-            if depth >= max_depth:
-                continue
-
-            try:
-                with os.scandir(current) as entries:
-                    for entry in entries:
-                        try:
-                            if not entry.is_dir(follow_symlinks=False) or entry.name in skipped:
-                                continue
-                            stack.append((Path(entry.path), depth + 1))
-                        except (FileNotFoundError, PermissionError):
+        try:
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    try:
+                        if not entry.is_dir(follow_symlinks=False) or entry.name in skipped:
                             continue
-            except (FileNotFoundError, PermissionError):
-                continue
+                        stack.append((Path(entry.path), depth + 1))
+                    except (FileNotFoundError, PermissionError):
+                        continue
+        except (FileNotFoundError, PermissionError):
+            continue
 
+    return libraries
+
+
+def find_libraries(roots: list[Path], jobs: int) -> list[Path]:
+    libraries: set[Path] = set()
+    workers = min(jobs, max(1, len(roots)))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+        for found in executor.map(scan_root_for_libraries, roots):
+            libraries.update(found)
     return sorted(libraries)
 
 
@@ -205,7 +214,7 @@ def main() -> int:
         home / ".devspace" / "worktrees",
         home / "Projects",
     ]
-    libraries = find_libraries(roots)
+    libraries = find_libraries(roots, args.jobs)
     if len(libraries) < 2:
         print("Fewer than two Unity Library directories were found; there is nothing to reflink.")
         return 0

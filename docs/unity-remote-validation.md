@@ -131,8 +131,9 @@ Run the migration only while validation jobs are stopped. The script preserves t
 file metadata and flushes the backing filesystem before cloning so OpenZFS does not
 reject dirty source blocks with `EAGAIN`. The scanner indexes files in one Python
 process, filters by Library-relative path and size, and hashes only possible duplicate
-groups in parallel. Use `--jobs N` to tune hashing concurrency; the default is the
-smaller of 8 workers or the detected CPU count.
+groups in parallel. Discovery across scan roots also uses the same worker pool. Use
+`--jobs N` to tune both discovery and hashing concurrency; the default is the smaller
+of 8 workers or the detected CPU count.
 
 ## Project configuration
 
