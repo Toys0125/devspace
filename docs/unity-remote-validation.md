@@ -115,10 +115,12 @@ only shares immutable physical blocks initially; each slot still has its own fil
 and copy-on-write changes. Imported artifacts, script assemblies, shader artifacts,
 and other project-local state therefore remain logically isolated.
 
-For slots that existed before reflink seeding was enabled, `scripts/reflink-unity-slots.sh`
-can replace byte-identical files at matching relative paths across all existing
-repository slots with reflink clones. It defaults to a dry run and refuses `--apply`
-while a Unity Editor process is detected:
+For Unity caches that existed before reflink seeding was enabled, `scripts/reflink-unity-slots.sh`
+can replace byte-identical files at matching `Library/`-relative paths with reflink
+clones. By default it scans validator slots, `~/.devspace/worktrees`, and `~/Projects`,
+so normal DevSpace/Git worktrees benefit as well as validation slots. Additional or
+replacement roots can be supplied with repeated `--scan-root PATH` arguments. It
+defaults to a dry run and refuses `--apply` while a Unity Editor process is detected:
 
 ```bash
 ./scripts/reflink-unity-slots.sh
