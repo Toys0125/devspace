@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-exec python3 - "$@" <<'PY'
+exec python3 -u - "$@" <<'PY'
 from __future__ import annotations
 
 import argparse
@@ -68,22 +68,52 @@ def unity_running() -> bool:
 
 def find_libraries(roots: list[Path]) -> list[Path]:
     libraries: set[Path] = set()
+    skipped = {
+        ".git", ".svn", ".hg", ".cache", ".gradle", ".vs", ".vscode",
+        "Library", "Temp", "Logs", "obj", "Build", "Builds", "node_modules",
+        "Packages", "Assets", "UserSettings",
+    }
+    max_depth = 4
+
     for root in roots:
+        root = root.resolve()
         if not root.is_dir():
             continue
-        for current, dirs, files in os.walk(root):
-            # Unity project identity. Avoid descending into Library itself after finding one.
-            if os.path.basename(current) == "ProjectSettings" and "ProjectVersion.txt" in files:
-                project = Path(current).parent
-                library = project / "Library"
-                if library.is_dir():
-                    libraries.add(library.resolve())
-                dirs[:] = []
+
+        stack: list[tuple[Path, int]] = [(root, 0)]
+        while stack:
+            current, depth = stack.pop()
+
+            # Check the Unity marker directly from the candidate project root instead
+            # of recursively walking ProjectSettings/Assets/Library trees.
+            try:
+                is_unity_project = (current / "ProjectSettings" / "ProjectVersion.txt").is_file()
+            except PermissionError:
                 continue
-            # These trees cannot contain another project definition worth scanning.
-            base = os.path.basename(current)
-            if base in {"Library", ".git", "Temp", "Logs", "obj", "Build", "Builds"}:
-                dirs[:] = []
+            if is_unity_project:
+                library = current / "Library"
+                try:
+                    if library.is_dir():
+                        libraries.add(library.resolve())
+                except PermissionError:
+                    pass
+                continue
+
+            if depth >= max_depth:
+                continue
+
+            try:
+                with os.scandir(current) as entries:
+                    for entry in entries:
+                        try:
+                            if not entry.is_dir(follow_symlinks=False) or entry.name in skipped:
+                                continue
+                            stack.append((Path(entry.path), depth + 1))
+                        except (FileNotFoundError, PermissionError):
+                            continue
+            except (FileNotFoundError, PermissionError):
+                continue
+
     return sorted(libraries)
 
 
