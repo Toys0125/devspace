@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createWriteStream, readdirSync, readFileSync, writeFileSync, type Dirent } from "node:fs";
-import { access, copyFile, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -518,20 +518,23 @@ export class UnityValidationRunner {
     await mkdir(join(this.config.stateDir, "slots", repoKey), { recursive: true });
 
     if (!(await pathExists(join(checkoutPath, ".git")))) {
-      const clone = await this.runCommand(
-        job,
-        "git-slot.log",
-        "git",
-        ["clone", mirrorPath, checkoutPath],
-        jobRoot,
-      );
-      if (!(await this.requireCommandSuccess(
-        job,
-        clone,
-        "INFRASTRUCTURE_FAILURE",
-        "GIT_CHECKOUT_FAILURE",
-        `Unable to initialize Unity validation slot ${slot}.`,
-      ))) return checkoutPath;
+      const seeded = await this.trySeedSlotWithReflink(job, repoKey, slot, checkoutPath, jobRoot);
+      if (!seeded) {
+        const clone = await this.runCommand(
+          job,
+          "git-slot.log",
+          "git",
+          ["clone", mirrorPath, checkoutPath],
+          jobRoot,
+        );
+        if (!(await this.requireCommandSuccess(
+          job,
+          clone,
+          "INFRASTRUCTURE_FAILURE",
+          "GIT_CHECKOUT_FAILURE",
+          `Unable to initialize Unity validation slot ${slot}.`,
+        ))) return checkoutPath;
+      }
     }
 
     const fetch = await this.runCommand(
@@ -595,6 +598,73 @@ export class UnityValidationRunner {
     ))) return checkoutPath;
 
     return checkoutPath;
+  }
+
+  private async trySeedSlotWithReflink(
+    job: InternalJob,
+    repoKey: string,
+    targetSlot: number,
+    checkoutPath: string,
+    jobRoot: string,
+  ): Promise<boolean> {
+    const slotsRoot = join(this.config.stateDir, "slots", repoKey);
+    for (const sourceSlot of [...this.freeSlots]) {
+      if (sourceSlot === targetSlot) continue;
+      const freeIndex = this.freeSlots.indexOf(sourceSlot);
+      if (freeIndex < 0) continue;
+      this.freeSlots.splice(freeIndex, 1);
+      try {
+        const sourcePath = join(slotsRoot, `slot-${sourceSlot}`);
+        if (!(await pathExists(join(sourcePath, ".git")))) continue;
+
+        const temporaryPath = `${checkoutPath}.reflink-${job.summary.jobId}`;
+        await rm(temporaryPath, { recursive: true, force: true });
+        const flush = await this.runCommand(
+          job,
+          "git-slot.log",
+          "sync",
+          ["-f", sourcePath],
+          jobRoot,
+        );
+        if (flush.exitCode !== 0 || flush.timedOut || flush.cancelled) {
+          await writeFile(
+            join(job.summary.artifactsDir, "git-slot.log"),
+            `Unable to flush idle slot ${sourceSlot} before reflink; falling back to a normal Git clone.\n`,
+            { flag: "a" },
+          );
+          return false;
+        }
+        const clone = await this.runCommand(
+          job,
+          "git-slot.log",
+          "cp",
+          ["-a", "--reflink=always", "--", sourcePath, temporaryPath],
+          jobRoot,
+        );
+        if (clone.exitCode === 0 && !clone.timedOut && !clone.cancelled) {
+          await rename(temporaryPath, checkoutPath);
+          await writeFile(
+            join(job.summary.artifactsDir, "git-slot.log"),
+            `Seeded slot ${targetSlot} from idle slot ${sourceSlot} using filesystem reflinks.\n`,
+            { flag: "a" },
+          );
+          return true;
+        }
+
+        await rm(temporaryPath, { recursive: true, force: true });
+        await writeFile(
+          join(job.summary.artifactsDir, "git-slot.log"),
+          `Reflink seed from idle slot ${sourceSlot} was unavailable; falling back to a normal Git clone.\n`,
+          { flag: "a" },
+        );
+        return false;
+      } finally {
+        this.freeSlots.push(sourceSlot);
+        this.freeSlots.sort((a, b) => a - b);
+        this.schedule();
+      }
+    }
+    return false;
   }
 
   private async withRepositoryLock<T>(key: string, work: () => Promise<T>): Promise<T> {

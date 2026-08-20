@@ -35,10 +35,16 @@ When `DEVSPACE_UNITY_RUNNER=1`, the worker additionally exposes:
 The worker maintains persistent bare Git mirrors and isolated validation slots.
 Each repository/slot pair preserves only the ignored Unity `Library/` directory
 between jobs; other generated/untracked state is cleaned before the next exact
-commit is checked out. Separately, all Unity Editor launches share one runner-owned
-Package Manager cache. This cross-project cache contains registry/package data and
-Git-LFS package content only; project import artifacts remain inside each isolated
-`Library/`.
+commit is checked out. When a new slot is needed and an initialized idle slot for
+the same repository exists, DevSpace first attempts `cp -a --reflink=always` to
+seed the new slot. On ZFS block-cloning-capable storage this makes the new checkout,
+Git objects, and `Library/` share physical blocks until either slot changes them.
+The seed slot is reserved from scheduling while it is copied. If reflinks are not
+supported, DevSpace falls back to the normal Git clone path.
+
+Separately, all Unity Editor launches share one runner-owned Package Manager cache.
+This cross-project cache contains registry/package data and Git-LFS package content
+only; project import artifacts remain inside each isolated `Library/`.
 
 Artifacts for every job include `summary.json` plus Git/Unity logs and Unity
 Test Framework XML when tests run.
@@ -104,11 +110,24 @@ packages Unity has already cached before this feature is enabled. Set the variab
 to `none` to opt out.
 
 This cache is intentionally narrower than Unity `Library/`. DevSpace does not
-share `Library/ArtifactDB`, imported asset outputs, script assemblies, shader
-artifacts, or other project-local import state between unrelated projects. Those
-need project isolation or a content-addressed service such as Unity Accelerator;
-directly reusing another project's `Library` would risk stale or incorrect import
-results.
+share one mutable `Library/` between slots or unrelated projects. Reflink seeding
+only shares immutable physical blocks initially; each slot still has its own files
+and copy-on-write changes. Imported artifacts, script assemblies, shader artifacts,
+and other project-local state therefore remain logically isolated.
+
+For slots that existed before reflink seeding was enabled, `scripts/reflink-unity-slots.sh`
+can replace byte-identical files at matching relative paths across all existing
+repository slots with reflink clones. It defaults to a dry run and refuses `--apply`
+while a Unity Editor process is detected:
+
+```bash
+./scripts/reflink-unity-slots.sh
+./scripts/reflink-unity-slots.sh --apply
+```
+
+Run the migration only while validation jobs are stopped. The script preserves target
+file metadata and flushes the backing filesystem before cloning so OpenZFS does not
+reject dirty source blocks with `EAGAIN`.
 
 ## Project configuration
 
