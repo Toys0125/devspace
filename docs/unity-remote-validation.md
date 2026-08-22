@@ -115,25 +115,29 @@ only shares immutable physical blocks initially; each slot still has its own fil
 and copy-on-write changes. Imported artifacts, script assemblies, shader artifacts,
 and other project-local state therefore remain logically isolated.
 
-For Unity caches that existed before reflink seeding was enabled, `scripts/reflink-unity-slots.sh`
-can replace byte-identical files at matching `Library/`-relative paths with reflink
-clones. By default it scans validator slots, `~/.devspace/worktrees`, and `~/Projects`,
-so normal DevSpace/Git worktrees benefit as well as validation slots. Additional or
-replacement roots can be supplied with repeated `--scan-root PATH` arguments. It
-defaults to a dry run and refuses `--apply` while a Unity Editor process is detected:
+For existing worktrees and Unity caches, `scripts/reflink-unity-slots.sh` can replace
+byte-identical files with copy-on-write reflink clones. By default it discovers Git
+repositories under `~/projects`, `~/Projects`, and `/Projects`, asks Git for every
+currently registered worktree, and scans those worktrees directly. It also discovers
+standalone Unity validation checkouts under the runner state directory. Use repeated
+`--repo-root PATH` arguments to select repository roots and `--scan-root PATH` for
+additional standalone Unity checkout discovery. It defaults to a dry run and refuses
+`--apply` while a Unity Editor process is detected:
 
 ```bash
 ./scripts/reflink-unity-slots.sh
 ./scripts/reflink-unity-slots.sh --apply
 ```
 
-Run the migration only while validation jobs are stopped. The script preserves target
-file metadata and flushes the backing filesystem before cloning so OpenZFS does not
-reject dirty source blocks with `EAGAIN`. The scanner indexes files in one Python
-process, filters by Library-relative path and size, and hashes only possible duplicate
-groups in parallel. Discovery across scan roots also uses the same worker pool. Use
-`--jobs N` to tune both discovery and hashing concurrency; the default is the smaller
-of 8 workers or the detected CPU count.
+Run the migration only while writers using those worktrees are stopped. The script
+preserves target file metadata, excludes Git metadata and nested repositories, groups
+files by worktree-relative path, size, and filesystem, then hashes only possible
+duplicate groups. Git worktree discovery, filesystem indexing, and hashing all use the
+same `--jobs N` worker count. Before `--apply`, it probes every backing filesystem for
+FICLONE support and exits before the expensive indexing phase if none support reflinks.
+It also flushes supported filesystems before cloning so OpenZFS does not reject dirty
+source blocks with `EAGAIN`. The default worker count is the smaller of 8 or the
+detected CPU count.
 
 ## Project configuration
 
