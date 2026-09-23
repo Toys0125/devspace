@@ -18,6 +18,7 @@ import { createMcpServer, createServer } from "./server.js";
 import { SqliteWorkspaceStore } from "./workspace-store.js";
 import { WorkspaceRegistry } from "./workspaces.js";
 import { writeTestDevspaceConfig } from "./test-support/config.test.js";
+import { getToolSurface } from "./tool-surfaces/index.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -45,6 +46,40 @@ test("tool modes expose the expected host-facing tool surface", async (t) => {
         tools.tools.map((tool) => tool.name).sort(),
         expected.sort(),
       );
+    });
+  }
+});
+
+test("command tools explicitly permit Git writes and gate commit and push", async (t) => {
+  const cases = [
+    { mode: "claude", toolName: "bash", commandField: "command" },
+    { mode: "codex", toolName: "exec_command", commandField: "cmd" },
+  ] as const;
+
+  for (const { mode, toolName, commandField } of cases) {
+    await t.test(mode, async (nested) => {
+      const context = await fixture(nested, { toolMode: mode, uiEnabled: false });
+      const tools = await context.client.listTools();
+      const commandTool = tools.tools.find((tool) => tool.name === toolName);
+      assert.ok(commandTool);
+
+      const properties = commandTool.inputSchema.properties as
+        | Record<string, { description?: string }>
+        | undefined;
+      const commandDescription = properties?.[commandField]?.description ?? "";
+
+      for (const description of [
+        commandTool.description ?? "",
+        commandDescription,
+        getToolSurface(mode).instructions({ agents: "", skills: "" }),
+      ]) {
+        assert.match(description, /git add/i);
+        assert.match(description, /git merge/i);
+        assert.match(description, /git commit/i);
+        assert.match(description, /git push/i);
+        assert.match(description, /create a commit only when the user explicitly asks/i);
+        assert.match(description, /do not infer permission/i);
+      }
     });
   }
 });

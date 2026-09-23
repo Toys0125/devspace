@@ -6,6 +6,7 @@ import {
 } from "../process-sessions.js";
 import {
   EDIT_TOOL_ANNOTATIONS,
+  GIT_COMMAND_POLICY,
   SHELL_TOOL_ANNOTATIONS,
   toolNames,
   workspaceIdDescription,
@@ -21,7 +22,7 @@ import {
 
 type CodexRegistration = (context: ToolRegistrationContext) => void;
 
-const CODEX_INSTRUCTIONS = `Follow instructions returned by ${toolNames.openWorkspace}; read applicable instruction and skill files before working in their scope.`;
+const CODEX_INSTRUCTIONS = `${GIT_COMMAND_POLICY} Follow instructions returned by ${toolNames.openWorkspace}; read applicable instruction and skill files before working in their scope.`;
 
 export function codexInstructions(): string {
   return CODEX_INSTRUCTIONS;
@@ -147,10 +148,10 @@ function registerCodexProcessTools(context: ToolRegistrationContext): void {
     {
       title: "Execute command",
       description:
-        "Run a shell command in a workspace with the user's local permissions. Returns the result when it exits during the yield window, otherwise returns a session_id for write_stdin.",
+        `Run a shell command in a workspace with the user's local permissions. Returns the result when it exits during the yield window, otherwise returns a session_id for write_stdin. ${GIT_COMMAND_POLICY}`,
       inputSchema: {
         workspace_id: z.string().describe(workspaceIdDescription),
-        cmd: z.string().min(1).describe("Shell command to execute."),
+        cmd: z.string().min(1).describe(`Shell command to execute. ${GIT_COMMAND_POLICY}`),
         tty: z
           .boolean()
           .optional()

@@ -6,6 +6,7 @@ import {
 } from "../pi-tools.js";
 import {
   EDIT_TOOL_ANNOTATIONS,
+  GIT_COMMAND_POLICY,
   SHELL_TOOL_ANNOTATIONS,
   WRITE_TOOL_ANNOTATIONS,
   toolNames,
@@ -22,7 +23,7 @@ import {
   textBlock,
 } from "./shared.js";
 
-const CLAUDE_INSTRUCTIONS = `Follow instructions returned by ${toolNames.openWorkspace}; read applicable instruction and skill files before working in their scope.`;
+const CLAUDE_INSTRUCTIONS = `${GIT_COMMAND_POLICY} Follow instructions returned by ${toolNames.openWorkspace}; read applicable instruction and skill files before working in their scope.`;
 
 export function claudeInstructions({
   agents,
@@ -36,7 +37,7 @@ export function registerClaudeTools(context: ToolRegistrationContext): void {
   registerShellTool(context);
 }
 
-const CLAUDE_SHELL_DESCRIPTION = "Run a shell command in a workspace with the user's local permissions.";
+const CLAUDE_SHELL_DESCRIPTION = `Run a shell command in a workspace with the user's local permissions. ${GIT_COMMAND_POLICY}`;
 
 function registerClaudeMutationTools(context: ToolRegistrationContext): void {
   const { server, config, workspaces } = context;
@@ -187,7 +188,7 @@ function registerShellTool(context: ToolRegistrationContext): void {
         workspace_id: z.string().describe(workspaceIdDescription),
         command: z
           .string()
-          .describe("Shell command to execute."),
+          .describe(`Shell command to execute. ${GIT_COMMAND_POLICY}`),
         working_directory: z
           .string()
           .optional()

@@ -16,6 +16,9 @@ export const toolNames = {
 export const workspaceIdDescription =
   "Workspace to use. Reuse the current project's workspace_id.";
 
+export const GIT_COMMAND_POLICY =
+  "Git read and write operations are supported, including git add, git fetch, git pull, git merge, git commit, and git push. Run git commit, git push, or any Git operation that would create a commit only when the user explicitly asks for that action. Do not infer permission to create commits or push from requests to edit, test, validate, finish, prepare, or review changes.";
+
 export const WRITE_TOOL_ANNOTATIONS = {
   readOnlyHint: false,
   destructiveHint: true,
