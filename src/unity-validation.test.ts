@@ -121,12 +121,16 @@ assert.deepEqual(redactRemoteUrl("https://user:secret@example.com/org/repo.git")
   credentialsRedacted: true,
 });
 assert.deepEqual(redactRemoteUrl("git@example.com:org/repo.git"), {
-  repositoryUrl: "example.com:org/repo.git",
-  credentialsRedacted: true,
+  repositoryUrl: "git@example.com:org/repo.git",
+  credentialsRedacted: false,
 });
 assert.deepEqual(redactRemoteUrl("ssh://token@example.com/org/repo.git"), {
   repositoryUrl: "ssh://example.com/org/repo.git",
   credentialsRedacted: true,
+});
+assert.deepEqual(redactRemoteUrl("ssh://git@example.com/org/repo.git"), {
+  repositoryUrl: "ssh://git@example.com/org/repo.git",
+  credentialsRedacted: false,
 });
 
 const runner = new UnityValidationRunner({
@@ -149,6 +153,18 @@ await assert.rejects(
 );
 await assert.rejects(
   () => runner.submit({ repositoryUrl: "https://example.com/not-allowed.git", commit }),
+  /Repository is not allowed/,
+);
+await assert.rejects(
+  () => runner.submit({ repositoryUrl: `${root}-malicious`, commit }),
+  /Repository is not allowed/,
+);
+await assert.rejects(
+  () => runner.submit({ repositoryUrl: "git@github.com:BasisVR/Basis.git", commit }),
+  /Repository is not allowed/,
+);
+await assert.rejects(
+  () => runner.submit({ repositoryUrl: "ssh://git@github.com/BasisVR/Basis.git", commit }),
   /Repository is not allowed/,
 );
 await assert.rejects(

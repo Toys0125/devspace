@@ -1,236 +1,305 @@
 # Configuration Reference
 
-DevSpace can be configured through `devspace init`, persisted config files, or
-environment variables.
+DevSpace stores durable settings in `~/.devspace/config.jsonc`. The file accepts
+comments and trailing commas and is validated before the server starts. Editor
+completion is provided by the versioned [JSON Schema](../schema/v1/devspace.schema.json),
+also hosted at the URL in the file's `$schema` property.
 
-The default files are:
+Authentication stays separate because it contains a secret:
 
 ```text
-~/.devspace/config.json
+~/.devspace/config.jsonc
 ~/.devspace/auth.json
 ```
 
-Use another config directory with:
+Run `devspace init` to create both files. `devspace config set publicBaseUrl
+<url|null>` updates the JSONC document without discarding its comments.
 
-```bash
-DEVSPACE_CONFIG_DIR=/path/to/config npx @waishnav/devspace serve
+## Complete example
+
+```jsonc
+{
+  "$schema": "https://raw.githubusercontent.com/Waishnav/devspace/main/schema/v1/devspace.schema.json",
+  "configVersion": 1,
+
+  "server": {
+    "host": "127.0.0.1",
+    "port": 7676,
+    // Use the public origin only; do not append /mcp.
+    "publicBaseUrl": "https://devspace.example.com",
+    "allowedHosts": [],
+    "trustProxy": false,
+  },
+  "workspaces": {
+    "allowedRoots": ["~/personal", "~/work"],
+    "worktreeRoot": "~/.devspace/worktrees",
+  },
+  "storage": {
+    "stateDir": "~/.local/share/devspace",
+  },
+  "tools": {
+    "mode": "codex",
+  },
+  "ui": {
+    "enabled": true,
+  },
+  "artifacts": {
+    "enabled": false,
+    "maxFileBytes": 104857600,
+  },
+  "skills": {
+    "enabled": true,
+    "paths": [],
+    "agentDir": "~/.codex",
+  },
+  "subagents": {
+    "enabled": false,
+    "instructions": "on-demand",
+    "providers": [],
+  },
+  "logging": {
+    "level": "info",
+    "format": "json",
+    "requests": true,
+    "assets": false,
+    "toolCalls": true,
+    "shellCommands": false,
+  },
+  "oauth": {
+    "accessTokenTtlSeconds": 3600,
+    "refreshTokenTtlSeconds": 2592000,
+    "scopes": ["devspace"],
+    "allowedResourceUrls": [],
+    "allowedRedirectHosts": ["chatgpt.com", "localhost", "127.0.0.1"],
+  },
+}
 ```
 
-## Commands
+Omitted sections and keys use the defaults shown above. An empty
+`workspaces.allowedRoots` uses the current working directory. Unknown keys are
+rejected so spelling mistakes cannot silently alter behavior.
 
-```bash
-npx @waishnav/devspace init
-npx @waishnav/devspace serve
-npx @waishnav/devspace doctor
-npx @waishnav/devspace config get
-npx @waishnav/devspace config set publicBaseUrl https://devspace.example.com
+`server.trustProxy` accepts `false`, `true`, or a nonnegative integer
+representing the number of trusted reverse-proxy hops. Prefer a bounded hop
+count when the proxy chain is known.
+
+`oauth.allowedResourceUrls` accepts exact alternate MCP resource URLs for
+clients that connect through a resource alias, such as a secure MCP tunnel.
+The normal `server.publicBaseUrl` `/mcp` resource remains allowed automatically.
+Configure the complete alias URL, not a hostname or origin; aliases do not
+change OAuth discovery URLs or proxy routing.
+Resource URLs must use HTTPS; HTTP is allowed only for `localhost`, `127.0.0.1`,
+or `[::1]`, with optional ports. Restart DevSpace after changing
+`oauth.allowedResourceUrls`: the provider reads this policy at server creation.
+After restarting, refresh tokens for removed aliases can no longer mint tokens.
+
+## Unity remote validation
+
+The optional Unity worker is configured under `unity` in
+`~/.devspace/config.jsonc`. The defaults keep the worker disabled:
+
+```jsonc
+{
+  "configVersion": 1,
+  "unity": {
+    "enabled": true,
+    "allowedRepositoryPrefixes": ["https://github.com/BasisVR/"],
+    "editorRoots": ["~/Unity/Hub/Editor"],
+    "maxConcurrentJobs": 1,
+    "autoInstallEditors": true
+  }
+}
 ```
 
-## Core Environment Variables
+Unity imports execute repository code, so enabling validation requires
+`allowedRepositoryPrefixes` unless `allowAnyRepository` is explicitly set to
+`true` on a trusted development-only worker. Exact prefixes must delimit
+repository names (for example, use a trailing `/` to allow all repositories
+under an organization). The runtime still recognizes the existing
+`DEVSPACE_UNITY_*` environment overrides, and older `config.json` Unity
+settings migrate to JSONC.
 
-| Variable | Purpose |
+Source-side helpers `prepare_unity_validation` and
+`check_unity_validation_receipt` are always available. Enabling the runner also
+registers submission, status, log, cancel, and health tools. See
+[Remote Unity validation](unity-remote-validation.md) for setup and workflow.
+
+## Tool modes and UI
+
+`tools.mode` accepts two values:
+
+| Value | Tool surface |
 | --- | --- |
-| `HOST` | Local bind host. Defaults to `127.0.0.1`. |
-| `PORT` | Local port. Defaults to `7676`. |
-| `DEVSPACE_ALLOWED_ROOTS` | Comma-separated local roots that workspaces may open. |
-| `DEVSPACE_PUBLIC_BASE_URL` | Public origin for the server, without `/mcp`. |
-| `DEVSPACE_ALLOWED_HOSTS` | Optional Host header allowlist override. |
-| `DEVSPACE_OAUTH_OWNER_TOKEN` | Owner password for OAuth approval. Must be at least 16 characters. |
-| `DEVSPACE_WORKTREE_ROOT` | Directory for managed Git worktrees. Defaults to `~/.devspace/worktrees`. |
-| `DEVSPACE_STATE_DIR` | Directory for SQLite state. Defaults to `~/.local/share/devspace`. |
+| `codex` | Default. `open_workspace`, `read`, `apply_patch`, `exec_command`, `write_stdin`, and `show_changes`. |
+| `claude` | `open_workspace`, `read`, `write`, `edit`, `bash`, and `show_changes`. |
 
-## Native Artifact Download
+The dedicated MCP tools `grep`, `glob`, and `ls` are not exposed. Each mode uses
+its shell tool with programs such as `rg`, `find`, and `ls` when it needs those
+operations.
 
-Native-file download is disabled by default. Enable it when ChatGPT needs to hand
-an attached or generated file into an already-open workspace:
+DevSpace attaches Apps UI metadata only to `open_workspace` and `show_changes`.
+This avoids rendering an iframe for every read, edit, search, or command call.
+Setting `ui.enabled` to `false` removes the metadata but does not remove the
+`show_changes` tool.
 
-```bash
-DEVSPACE_ARTIFACTS=1 npx @waishnav/devspace serve
+## Skills and subagents
+
+DevSpace discovers standard Agent Skills from `~/.agents/skills`, project
+`.agents/skills`, and `~/.devspace/skills`. It also checks
+`skills.agentDir/skills` and each path in `skills.paths`. Relative custom paths
+are resolved from the active workspace.
+
+When Subagents are enabled for MCP workspaces, DevSpace keeps its bundled
+`subagents` skill synchronized at `~/.devspace/skills/subagents/SKILL.md`.
+That managed copy is the authoritative `subagents` skill for DevSpace and is
+refreshed when the packaged skill changes.
+
+Subagent providers are explicit. Omitted providers are disabled:
+
+```jsonc
+{
+  "configVersion": 1,
+  "subagents": {
+    "enabled": true,
+    "instructions": "on-demand",
+    "providers": [
+      {
+        "id": "codex",
+        "enabled": true,
+        "model": "gpt-5.4",
+        "effort": "high",
+        "command": "/opt/devspace/bin/codex-wrapper",
+        "env": {
+          "CODEX_HOME": "/home/alice/.codex-work",
+          "OPENAI_BASE_URL": "https://api.example.com/v1",
+        },
+      },
+      {
+        "id": "claude",
+        "enabled": true,
+        "model": "sonnet",
+      },
+    ],
+  },
+}
 ```
 
-This feature currently supports Linux. It is not registered on macOS, Windows,
-or BSD because the secure publication path depends on traversable,
-descriptor-anchored directory paths provided by Linux procfs.
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `DEVSPACE_ARTIFACTS` | `0` | Expose `download_artifact` for trusted native files. |
-| `DEVSPACE_ARTIFACT_MAX_FILE_BYTES` | `104857600` | Maximum streamed size of one file (100 MiB). |
-
-The same settings may be persisted in `~/.devspace/config.json` as
-`artifactsEnabled` and `artifactMaxFileBytes`.
-
-`download_artifact` accepts the native file object supplied by the MCP connector,
-a `workspaceId` returned by `open_workspace`, and a relative workspace `path`.
-DevSpace safely creates missing parent directories, refuses to overwrite an
-existing destination, and returns only the normalized workspace-relative path.
-It does not accept conflict modes, expected hashes, arbitrary URL strings, local
-paths, embedded credentials, or extra object fields.
-
-There is no artifact root, total quota, TTL, pinning, persistent database record,
-or background artifact cleanup service. See [Native File Download](artifact-exchange.md)
-for the supported connector shape and security boundaries.
-
-## OAuth
-
-DevSpace uses a single-user OAuth approval flow.
-
-| Variable | Default |
-| --- | --- |
-| `DEVSPACE_OAUTH_ACCESS_TOKEN_TTL_SECONDS` | `3600` |
-| `DEVSPACE_OAUTH_REFRESH_TOKEN_TTL_SECONDS` | `2592000` |
-| `DEVSPACE_OAUTH_SCOPES` | `devspace` |
-| `DEVSPACE_OAUTH_ALLOWED_REDIRECT_HOSTS` | `chatgpt.com,localhost,127.0.0.1` |
-
-MCP clients discover metadata from:
-
-```text
-/.well-known/oauth-protected-resource/mcp
-/.well-known/oauth-authorization-server
-```
-
-## Tool Modes
-
-`DEVSPACE_TOOL_MODE` controls the tool surface.
+`subagents.instructions` controls when ChatGPT receives the managed workflow:
 
 | Value | Behavior |
 | --- | --- |
-| `minimal` | Default. Exposes `open_workspace`, `read`, `write`, `edit`, and `bash`. Clients use `bash` with tools such as `rg`, `find`, and `ls` for inspection. |
-| `full` | Exposes the minimal tools plus dedicated `grep`, `glob`, and `ls` tools. |
-| `codex` | Experimental. Exposes `open_workspace`, `read`, `apply_patch`, `exec_command`, and `write_stdin`. Existing mutation and shell tools are hidden. |
+| `on-demand` | Default. `open_workspace` advertises the `subagents` skill and the model reads it only when the task benefits from delegation. |
+| `preload` | `open_workspace` includes the `subagents` workflow in its initial workspace instructions instead of advertising that skill for a separate read. |
 
-`DEVSPACE_MINIMAL_TOOLS` remains a backward-compatible alias when
-`DEVSPACE_TOOL_MODE` is unset: `1` selects `minimal` and `0` selects `full`.
-The `codex` mode must be selected through `DEVSPACE_TOOL_MODE` and always uses
-its fixed short tool names regardless of `DEVSPACE_TOOL_NAMING`.
+Both modes only make the workflow available; neither tells the model to prefer
+subagents for routine work.
 
-Codex-mode commands run without a PTY by default. Set `tty: true` on
-`exec_command` for interactive terminal programs. PTY support uses the optional
-`node-pty` dependency; `write_stdin` can send input, poll output, and resize PTY
-sessions.
+Profiles are loaded from `~/.devspace/agents/*.md` and project
+`.devspace/agents/*.md`. `devspace agents targets` prints the configured targets
+available in the current workspace.
 
-## Widgets
+`command` names one executable. DevSpace does not split shell arguments, so use
+a wrapper executable when startup needs fixed arguments. `env` maps environment
+variable names to literal string values and preserves empty strings. DevSpace
+does not expand `$NAME` references in these values.
 
-`DEVSPACE_WIDGETS` controls ChatGPT Apps iframe usage.
+All subagent providers accept `env`. The daemon inherits its startup
+environment, then overlays the provider's `env` without mutating the daemon's
+process environment. OpenCode receives that environment on its managed server
+process; embedded Pi scopes it to its provider requests and command execution.
 
-| Value | Behavior |
-| --- | --- |
-| `full` | Default. Widget UI is attached to exposed workspace, file, edit, and shell tools. |
-| `changes` | Enables the aggregate `show_changes` tool and attaches widget UI to `open_workspace` and `show_changes`. |
-| `off` | Disables widget UI. |
+Codex, Claude, Cursor, Copilot, and Grok also accept `command`. OpenCode and Pi
+do not expose a command override. For providers that support it, an explicit
+`command` wins over both the inherited command override and a command override
+placed in `env`.
 
-## Skills
+Existing process-level overrides remain supported: `CODEX_COMMAND`,
+`CODEX_HOME`, `CLAUDE_COMMAND`, `CURSOR_COMMAND`, `COPILOT_COMMAND`,
+`GROK_COMMAND`, and `GROK_AGENT_PROFILE`. Provider configuration takes
+precedence where the same value is set in both places.
+
+DevSpace writes `config.jsonc` with mode `0600`, but provider environment values
+are still plain text on disk. Keep the file out of version control. Leave
+credentials in the process environment if you do not want DevSpace to persist
+them.
+
+## Native artifact download
+
+Set `artifacts.enabled` to `true` when a host needs to save a native attached or
+generated file into an open workspace. `artifacts.maxFileBytes` limits one
+streamed file. The secure publication path is available on Linux, macOS, and
+Windows; the tool is not registered on BSD.
+
+## Environment boundary
+
+Only two user-facing DevSpace environment variables remain:
 
 | Variable | Purpose |
 | --- | --- |
-| `DEVSPACE_SKILLS` | Set to `0` to hide skills. Enabled by default. |
-| `DEVSPACE_SUBAGENTS` | Set to `1` to expose configured agent profiles as Subagents. Experimental and disabled by default. |
-| `DEVSPACE_AGENT_DIR` | Defaults to `~/.codex`; its `skills` child is loaded for compatibility. |
-| `DEVSPACE_SKILL_PATHS` | Optional comma-separated additional skill directories. |
+| `DEVSPACE_CONFIG_DIR` | Bootstrap location for `config.jsonc`, `auth.json`, skills, and profiles. |
+| `DEVSPACE_OAUTH_OWNER_TOKEN` | Optional secret override for the owner token stored in `auth.json`. |
 
-DevSpace discovers standard Agent Skills from:
+Durable environment settings were removed in v1.1. Move existing deployment
+values to these JSONC keys:
 
-- `~/.agents/skills`
-- project `.agents/skills`
-- `~/.devspace/skills`
-
-It also keeps compatibility with:
-
-- the bundled `unity-remote-validation` skill, installed automatically unless `~/.devspace/skills/unity-remote-validation/SKILL.md` already exists
-- the bundled `subagent-delegation` skill when `DEVSPACE_SUBAGENTS=1`, unless `~/.devspace/skills/subagent-delegation/SKILL.md` exists
-- `DEVSPACE_AGENT_DIR/skills`, defaulting to `~/.codex/skills`
-- additional paths from `DEVSPACE_SKILL_PATHS`
-
-When Subagents are enabled, DevSpace discovers agent profiles
-from:
-
-- `~/.devspace/agents/*.md`
-- project `.devspace/agents/*.md`
-
-`open_workspace` returns a compact catalog containing profile names,
-descriptions, providers, and optional models/thinking levels so the host model can choose an
-agent without reading provider-specific launch details. `devspace agents ls`
-lists existing subagent sessions for the current workspace, scoped by the
-workspace environment injected into shell commands. The `subagent-delegation`
-skill teaches the model to use only the minimal `devspace agents ls`,
-`devspace agents run`, and `devspace agents show` workflow.
-
-Starter profile templates are available under `examples/agents/`. Copy or adapt
-them into one of the active profile directories before use.
-
-Legacy project paths such as `.pi/skills` can be added through `DEVSPACE_SKILL_PATHS` when needed.
-
-Example:
-
-```bash
-DEVSPACE_SKILL_PATHS="$HOME/.claude/skills,$HOME/company/skills" \
-npx @waishnav/devspace serve
-```
-
-## Unity Validation Worker
-
-Every DevSpace instance exposes source-side helpers for immutable Unity handoff:
-`prepare_unity_validation` and `check_unity_validation_receipt`.
-
-Enable the execution worker only on the DevSpace instance that has Unity editors
-installed:
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `DEVSPACE_UNITY_RUNNER` | `0` | Expose Unity submit/status/log/cancel/health tools. |
-| `DEVSPACE_UNITY_EDITOR_ROOTS` | `~/Unity/Hub/Editor,/opt/unity/editors` | Comma-separated roots containing versioned Unity editor installs. |
-| `DEVSPACE_UNITY_STATE_DIR` | `<DEVSPACE_STATE_DIR>/unity-runner` | Mirrors, isolated job checkouts, logs, and receipts. |
-| `DEVSPACE_UNITY_MAX_CONCURRENT_JOBS` | `1` | Maximum simultaneous Unity jobs (1-32). |
-| `DEVSPACE_UNITY_JOB_TIMEOUT_SECONDS` | `7200` | Per Git/Unity command timeout. |
-| `DEVSPACE_UNITY_AUTO_INSTALL_EDITORS` | `0` | Automatically install a missing exact Editor version before validation. |
-| `DEVSPACE_UNITY_EDITOR_INSTALL_TIMEOUT_SECONDS` | `7200` | Timeout for each automatic Editor install operation. |
-| `DEVSPACE_UNITY_EDITOR_INSTALLER` | `unity-cli` | Editor installer backend: `unity-cli` (recommended) or legacy `hub`. |
-| `DEVSPACE_UNITY_CLI_EXECUTABLE` | `unity` | Standalone Unity CLI executable used by the default installer backend. |
-| `DEVSPACE_UNITY_HUB_EXECUTABLE` | `unityhub` | Deprecated Unity Hub CLI executable used only when `DEVSPACE_UNITY_EDITOR_INSTALLER=hub`. |
-| `DEVSPACE_UNITY_XVFB_EXECUTABLE` | `xvfb-run` on Linux | Wrap Unity Editor launches in a virtual X display. Linux validation runs in graphics mode under Xvfb because some Unity/Input System paths can crash when queried under `-nographics`. Set `none` to disable. |
-| `DEVSPACE_UNITY_SHARED_UPM_CACHE_ROOT` | Unity's per-user global UPM cache | Shared cross-project Unity Package Manager cache for registry data, unpacked packages, and Git-LFS package content. On Linux the default is `~/.cache/Unity/upm`. Set `none` to disable. Project `Library/` directories remain isolated. |
-| `DEVSPACE_UNITY_PERSONAL_LICENSE_FILE` | empty | Optional GameCI-style Personal `.ulf` source. Must be configured together with the email/password file paths. |
-| `DEVSPACE_UNITY_PERSONAL_EMAIL_FILE` | empty | File containing the Unity account email used for Personal activation. |
-| `DEVSPACE_UNITY_PERSONAL_PASSWORD_FILE` | empty | File containing the Unity account password used for Personal activation. Prefer a Docker secret. |
-| `DEVSPACE_UNITY_ALLOWED_REPOSITORIES` | empty | Comma-separated repository URL prefix allowlist. Required when the Unity runner is enabled. |
-| `DEVSPACE_UNITY_ALLOW_ANY_REPOSITORY` | `0` | Unsafe development-only opt-in to run repositories without an allowlist. |
-
-The same settings may be persisted as the nested `unity` object in
-`~/.devspace/config.json`. See [Remote Unity validation](unity-remote-validation.md)
-for the repository profile schema, agent workflow, failure categories, and
-container deployment guidance.
-
-## Logging
-
-| Variable | Default |
+| Removed setting | JSONC key |
 | --- | --- |
-| `DEVSPACE_LOG_LEVEL` | `info` |
-| `DEVSPACE_LOG_FORMAT` | `json` |
-| `DEVSPACE_LOG_REQUESTS` | `1` |
-| `DEVSPACE_LOG_ASSETS` | `0` |
-| `DEVSPACE_LOG_TOOL_CALLS` | `1` |
-| `DEVSPACE_LOG_SHELL_COMMANDS` | `0` |
-| `DEVSPACE_TRUST_PROXY` | `0` |
+| `HOST`, `PORT` | `server.host`, `server.port` |
+| `DEVSPACE_PUBLIC_BASE_URL` | `server.publicBaseUrl` |
+| `DEVSPACE_ALLOWED_HOSTS` | `server.allowedHosts` |
+| `DEVSPACE_TRUST_PROXY` | `server.trustProxy` |
+| `DEVSPACE_ALLOWED_ROOTS` | `workspaces.allowedRoots` |
+| `DEVSPACE_WORKTREE_ROOT` | `workspaces.worktreeRoot` |
+| `DEVSPACE_STATE_DIR` | `storage.stateDir` |
+| `DEVSPACE_TOOL_MODE`, `DEVSPACE_MINIMAL_TOOLS` | `tools.mode` |
+| `DEVSPACE_WIDGETS` | `ui.enabled` |
+| `DEVSPACE_ARTIFACTS` | `artifacts.enabled` |
+| `DEVSPACE_ARTIFACT_MAX_FILE_BYTES` | `artifacts.maxFileBytes` |
+| `DEVSPACE_SKILLS` | `skills.enabled` |
+| `DEVSPACE_SKILL_PATHS` | `skills.paths` |
+| `DEVSPACE_AGENT_DIR` | `skills.agentDir` |
+| `DEVSPACE_SUBAGENTS` | `subagents.enabled` |
+| `DEVSPACE_LOG_LEVEL` | `logging.level` |
+| `DEVSPACE_LOG_FORMAT` | `logging.format` |
+| `DEVSPACE_LOG_REQUESTS` | `logging.requests` |
+| `DEVSPACE_LOG_ASSETS` | `logging.assets` |
+| `DEVSPACE_LOG_TOOL_CALLS` | `logging.toolCalls` |
+| `DEVSPACE_LOG_SHELL_COMMANDS` | `logging.shellCommands` |
+| `DEVSPACE_OAUTH_ACCESS_TOKEN_TTL_SECONDS` | `oauth.accessTokenTtlSeconds` |
+| `DEVSPACE_OAUTH_REFRESH_TOKEN_TTL_SECONDS` | `oauth.refreshTokenTtlSeconds` |
+| `DEVSPACE_OAUTH_SCOPES` | `oauth.scopes` |
+| `DEVSPACE_OAUTH_ALLOWED_REDIRECT_HOSTS` | `oauth.allowedRedirectHosts` |
 
-`DEVSPACE_TRUST_PROXY` accepts `0`/false, a positive numeric proxy-hop count, or the legacy boolean true values. For reverse proxies, prefer the smallest correct hop count (for example `1` when exactly one trusted proxy connects directly to DevSpace). Avoid boolean `true` on an Internet-facing service because it trusts the entire forwarded chain and weakens IP-based rate limiting.
+These environment values are not read or auto-imported in v1.1. Environment is
+process state, so there is no reliable file DevSpace can migrate on the user's
+behalf.
 
-Set `DEVSPACE_LOG_FORMAT=pretty` for local debugging.
+## v1.0 file migration
 
-Set `DEVSPACE_LOG_SHELL_COMMANDS=1` only when you intentionally want command
-previews in logs.
+The first v1.1 load performs one migration when `config.jsonc` is missing and
+`config.json` exists:
 
-## Env-Only Example
+1. Validate the old JSON document.
+2. Translate its known fields into the versioned JSONC structure.
+3. Write and validate a temporary `config.jsonc`.
+4. Atomically publish it.
+5. Rename the old file to `config.json.v1.0.bak`.
 
-```bash
-DEVSPACE_OAUTH_OWNER_TOKEN="$(openssl rand -base64 32)" \
-DEVSPACE_ALLOWED_ROOTS="$HOME/personal,$HOME/work" \
-DEVSPACE_PUBLIC_BASE_URL="https://devspace.example.com" \
-DEVSPACE_WORKTREE_ROOT="$HOME/.devspace/worktrees" \
-DEVSPACE_ARTIFACTS="1" \
-DEVSPACE_TOOL_MODE="minimal" \
-DEVSPACE_WIDGETS="full" \
-npx @waishnav/devspace serve
-```
+If `config.jsonc` exists, DevSpace never reads `config.json`. Invalid JSONC also
+never falls back to the old file. Unsupported legacy keys stop migration with an
+actionable error instead of being silently discarded.
 
-The environment assignments must be part of the same command invocation, or
-exported first.
+The persisted fields map as follows:
+
+| v1.0 JSON field | v1.1 JSONC key |
+| --- | --- |
+| `host`, `port` | `server.host`, `server.port` |
+| `publicBaseUrl`, `allowedHosts` | `server.publicBaseUrl`, `server.allowedHosts` |
+| `allowedRoots`, `worktreeRoot` | `workspaces.allowedRoots`, `workspaces.worktreeRoot` |
+| `stateDir` | `storage.stateDir` |
+| `artifactsEnabled`, `artifactMaxFileBytes` | `artifacts.enabled`, `artifacts.maxFileBytes` |
+| `agentDir` | `skills.agentDir` |
+| `subagents` | `subagents` |
+| `tools.mode`, `ui.enabled` | unchanged nested keys |
+
+`auth.json` is unchanged.

@@ -51,6 +51,34 @@ Test Framework XML when tests run.
 
 ## Worker configuration
 
+Unity runner settings are supported in the new versioned
+`~/.devspace/config.jsonc` format. For example:
+
+```jsonc
+{
+  "configVersion": 1,
+  "unity": {
+    "enabled": true,
+    "stateDir": "~/.local/share/devspace/unity-runner",
+    "editorRoots": ["~/Unity/Hub/Editor"],
+    "maxConcurrentJobs": 1,
+    "autoInstallEditors": true,
+    "allowedRepositoryPrefixes": [
+      "https://github.com/BasisVR/",
+      "git@github.com:Toys0125/"
+    ]
+  }
+}
+```
+
+Existing legacy `config.json` worker settings are migrated to `config.jsonc`
+by DevSpace. The environment variables below continue to override worker settings.
+
+The worker's MCP tool arguments use snake_case (`repository_url`, `project_path`,
+`config_path`, `job_id`, `tail_lines`, `workspace_id`,
+`validated_commit`). The `.unity-validation.json` file and the returned
+validation receipt keep their existing camelCase field names.
+
 Typical Unity-Server environment:
 
 ```bash
@@ -198,12 +226,11 @@ WORKDIR /src/devspace
 # Prefer a pinned source tree/commit supplied by the build context. If this
 # Dockerfile lives in another repository, clone the fork at a pinned SHA here
 # instead.
-COPY devspace/package.json devspace/package-lock.json ./
-# DevSpace's postinstall lifecycle script runs during npm ci.
+COPY devspace/package.json devspace/pnpm-lock.yaml devspace/pnpm-workspace.yaml ./
 COPY devspace/scripts/ ./scripts/
-RUN npm ci
+RUN corepack enable && pnpm install --frozen-lockfile
 COPY devspace/ ./
-RUN npm run build \
+RUN pnpm build \
  && npm pack --pack-destination /out
 
 FROM <your-unity-server-base-image>

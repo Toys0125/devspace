@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpRegistrationTarget } from "./mcp-modern-server.js";
 import * as z from "zod/v4";
 import { UnityValidationRunner, type UnityValidationSummary } from "./unity-validation.js";
 
@@ -26,7 +26,7 @@ function summaryText(summary: UnityValidationSummary): string {
   return lines.join("\n");
 }
 
-export function registerUnityValidationTools(server: McpServer, runner: UnityValidationRunner): void {
+export function registerUnityValidationTools(server: McpRegistrationTarget, runner: UnityValidationRunner): void {
   server.registerTool(
     "submit_unity_validation",
     {
@@ -34,11 +34,11 @@ export function registerUnityValidationTools(server: McpServer, runner: UnityVal
       description:
         "Queue compile/test/build validation of an immutable Git commit on this Unity worker. Pass a repository URL and hexadecimal commit SHA, never a branch or tag. The worker clones/fetches its own isolated checkout, selects the exact Unity version from ProjectSettings/ProjectVersion.txt, optionally auto-installs a missing Editor when configured, and executes the requested profile from .unity-validation.json or the built-in compile/test/playmode/full profiles.",
       inputSchema: {
-        repositoryUrl: z.string().min(1).describe("Git clone URL available to the Unity worker."),
+        repository_url: z.string().min(1).describe("Git clone URL available to the Unity worker."),
         commit: z.string().regex(/^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/).describe("Full immutable hexadecimal Git commit SHA (40 or 64 characters)."),
         profile: z.string().min(1).optional().describe("Validation profile. Defaults to test."),
-        projectPath: z.string().optional().describe("Unity project path relative to repository root. Overrides .unity-validation.json."),
-        configPath: z.string().optional().describe("Validation config path relative to repository root. Defaults to .unity-validation.json."),
+        project_path: z.string().optional().describe("Unity project path relative to repository root. Overrides .unity-validation.json."),
+        config_path: z.string().optional().describe("Validation config path relative to repository root. Defaults to .unity-validation.json."),
       },
       annotations: {
         readOnlyHint: false,
@@ -48,7 +48,7 @@ export function registerUnityValidationTools(server: McpServer, runner: UnityVal
       },
     },
     async (args) => {
-      const summary = await runner.submit(args);
+      const summary = await runner.submit({ repositoryUrl: args.repository_url, commit: args.commit, profile: args.profile, projectPath: args.project_path, configPath: args.config_path });
       return {
         content: [{ type: "text", text: `${summaryText(summary)}\nUse get_unity_validation with this jobId until it reaches a terminal state.` }],
       };
@@ -62,12 +62,12 @@ export function registerUnityValidationTools(server: McpServer, runner: UnityVal
       description:
         "Return the current status or final validation receipt for a Unity validation job, including the exact validated commit, Unity version, step results, and classified failure information.",
       inputSchema: {
-        jobId: z.string().min(1),
+        job_id: z.string().min(1),
       },
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    async ({ jobId }) => ({
-      content: [{ type: "text", text: summaryText(runner.get(jobId)) }],
+    async ({ job_id }) => ({
+      content: [{ type: "text", text: summaryText(runner.get(job_id)) }],
     }),
   );
 
@@ -78,14 +78,14 @@ export function registerUnityValidationTools(server: McpServer, runner: UnityVal
       description:
         "Read the tail of one artifact from a Unity validation job. Common artifacts are unity-install.log, compile.log, editmode.log, editmode-results.xml, playmode.log, playmode-results.xml, build.log, validator-N.log, git-fetch.log, and summary.json.",
       inputSchema: {
-        jobId: z.string().min(1),
+        job_id: z.string().min(1),
         artifact: z.string().min(1).describe("Single artifact filename, not a path."),
-        tailLines: z.number().int().min(1).max(2_000).optional().describe("Defaults to 200 lines."),
+        tail_lines: z.number().int().min(1).max(2_000).optional().describe("Defaults to 200 lines."),
       },
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    async ({ jobId, artifact, tailLines }) => ({
-      content: [{ type: "text", text: await runner.readArtifact(jobId, artifact, tailLines ?? 200) }],
+    async ({ job_id, artifact, tail_lines }) => ({
+      content: [{ type: "text", text: await runner.readArtifact(job_id, artifact, tail_lines ?? 200) }],
     }),
   );
 
@@ -95,7 +95,7 @@ export function registerUnityValidationTools(server: McpServer, runner: UnityVal
       title: "Cancel Unity validation",
       description: "Cancel a queued or running Unity validation job.",
       inputSchema: {
-        jobId: z.string().min(1),
+        job_id: z.string().min(1),
       },
       annotations: {
         readOnlyHint: false,
@@ -104,8 +104,8 @@ export function registerUnityValidationTools(server: McpServer, runner: UnityVal
         openWorldHint: false,
       },
     },
-    async ({ jobId }) => ({
-      content: [{ type: "text", text: summaryText(await runner.cancel(jobId)) }],
+    async ({ job_id }) => ({
+      content: [{ type: "text", text: summaryText(await runner.cancel(job_id)) }],
     }),
   );
 
@@ -115,6 +115,7 @@ export function registerUnityValidationTools(server: McpServer, runner: UnityVal
       title: "Unity server health",
       description:
         "Report Unity validation worker capacity, queue depth, configured Unity editor roots, automatic Editor-install status, and versions currently being installed. Use this to distinguish runner availability from source-code failures.",
+      inputSchema: {},
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     async () => ({

@@ -1,69 +1,65 @@
-import { spawnSync } from "node:child_process";
-import { delimiter, resolve } from "node:path";
-import { removeDevspaceNodeModulesBinFromPath } from "./local-agent-path.js";
 import {
   LOCAL_AGENT_PROVIDERS,
   type LocalAgentProvider,
 } from "./local-agent-profiles.js";
+import { resolveExecutableCommand } from "./local-agent-command.js";
+import {
+  localAgentProviderEnvironment,
+  type SubagentsConfig,
+} from "./local-agent-config.js";
 
 export interface LocalAgentProviderAvailability {
   name: LocalAgentProvider;
   available: boolean;
   reason?: string;
+  note?: string;
 }
 
 export function getLocalAgentProviderAvailabilitySnapshot(
   env: NodeJS.ProcessEnv = process.env,
+  config?: SubagentsConfig,
 ): LocalAgentProviderAvailability[] {
-  return LOCAL_AGENT_PROVIDERS.map((provider) => checkLocalAgentProviderAvailability(provider, env));
+  return LOCAL_AGENT_PROVIDERS.map((provider) => (
+    checkLocalAgentProviderAvailability(provider, env, config)
+  ));
 }
 
-export function checkLocalAgentProviderAvailability(
+function checkLocalAgentProviderAvailability(
   provider: LocalAgentProvider,
   env: NodeJS.ProcessEnv = process.env,
+  config?: SubagentsConfig,
 ): LocalAgentProviderAvailability {
+  const providerEnv = config ? localAgentProviderEnvironment(config, provider, env) : env;
   switch (provider) {
     case "codex":
-      return packageAvailability(provider, "@openai/codex-sdk");
+      return codexAvailability(providerEnv);
     case "claude":
-      return packageAvailability(provider, "@anthropic-ai/claude-agent-sdk");
+      return providerEnv.CLAUDE_COMMAND
+        ? commandAvailability(provider, providerEnv.CLAUDE_COMMAND, providerEnv)
+        : packageAvailability(provider, "@anthropic-ai/claude-agent-sdk");
     case "opencode":
       return packageAvailability(provider, "@opencode-ai/sdk/v2");
     case "pi":
-      return commandAvailability(provider, env.PI_COMMAND ?? "pi", {
-        env: piAvailabilityEnvironment(env),
-      });
+      return packageAvailability(provider, "@earendil-works/pi-coding-agent");
     case "cursor":
-      return commandAvailability(provider, "cursor-agent");
+      return commandAvailability(provider, providerEnv.CURSOR_COMMAND ?? "cursor-agent", providerEnv);
     case "copilot":
-      return commandAvailability(provider, "copilot");
+      return commandAvailability(provider, providerEnv.COPILOT_COMMAND ?? "copilot", providerEnv);
+    case "grok":
+      return commandAvailability(provider, providerEnv.GROK_COMMAND ?? "grok", providerEnv);
   }
 }
 
 export function assertLocalAgentProviderAvailable(
   provider: LocalAgentProvider,
   env: NodeJS.ProcessEnv = process.env,
+  config?: SubagentsConfig,
 ): void {
-  const availability = checkLocalAgentProviderAvailability(provider, env);
+  const availability = checkLocalAgentProviderAvailability(provider, env, config);
   if (availability.available) return;
   throw new Error(
     `${provider} provider is not available: ${availability.reason ?? "provider preflight failed"}`,
   );
-}
-
-export function formatLocalAgentProviderAvailabilitySummary(
-  providers: LocalAgentProviderAvailability[],
-): string {
-  const available = providers
-    .filter((provider) => provider.available)
-    .map((provider) => provider.name);
-  const unavailable = providers
-    .filter((provider) => !provider.available)
-    .map((provider) => `${provider.name} (${provider.reason ?? "unavailable"})`);
-  return [
-    available.length > 0 ? `available: ${available.join(", ")}` : undefined,
-    unavailable.length > 0 ? `unavailable: ${unavailable.join(", ")}` : undefined,
-  ].filter(Boolean).join("; ");
 }
 
 function packageAvailability(
@@ -82,70 +78,25 @@ function packageAvailability(
   }
 }
 
+function codexAvailability(env: NodeJS.ProcessEnv): LocalAgentProviderAvailability {
+  const availability = commandAvailability("codex", env.CODEX_COMMAND ?? "codex", env);
+  return availability.available
+    ? {
+        ...availability,
+        note: "available",
+      }
+    : availability;
+}
+
 function commandAvailability(
   provider: LocalAgentProvider,
   command: string,
-  options: { env?: NodeJS.ProcessEnv } = {},
+  env: NodeJS.ProcessEnv,
 ): LocalAgentProviderAvailability {
-  const executable = resolveCommand(command, options.env);
-  if (!executable) {
-    return {
-      name: provider,
-      available: false,
-      reason: `${command} executable not found`,
-    };
-  }
-
-  return { name: provider, available: true };
-}
-
-function resolveCommand(command: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
-  const commandHasPath = command.includes("/") || command.includes("\\");
-  if (commandHasPath) return executableExists(command, env) ? command : undefined;
-
-  for (const candidate of candidateCommandPaths(command, env)) {
-    if (executableExists(candidate, env)) return candidate;
-  }
-  return undefined;
-}
-
-function candidateCommandPaths(command: string, env: NodeJS.ProcessEnv): string[] {
-  const path = env.PATH;
-  if (!path) return [];
-  const extensions = process.platform === "win32"
-    ? (env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD")
-      .split(";")
-      .filter(Boolean)
-    : [""];
-  const candidates: string[] = [];
-  for (const directory of path.split(delimiter)) {
-    if (!directory) continue;
-    for (const extension of extensions) {
-      candidates.push(resolve(directory, `${command}${extension}`));
-    }
-  }
-  return candidates;
-}
-
-function executableExists(command: string, env: NodeJS.ProcessEnv): boolean {
-  const result = spawnSync(command, ["--version"], {
-    encoding: "utf8",
-    env,
-    windowsHide: true,
-    timeout: 5_000,
-  });
-  const code = typeof result.error === "object" && result.error && "code" in result.error
-    ? result.error.code
-    : undefined;
-  return code !== "ENOENT";
-}
-
-function piAvailabilityEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  if (env.PI_COMMAND) return env;
-  const path = env.PATH;
-  if (!path) return env;
+  if (resolveExecutableCommand(command, env)) return { name: provider, available: true };
   return {
-    ...env,
-    PATH: removeDevspaceNodeModulesBinFromPath(path),
+    name: provider,
+    available: false,
+    reason: `${command} executable not found`,
   };
 }

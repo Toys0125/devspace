@@ -1412,12 +1412,12 @@ function validateRepositoryUrl(
     const scpStyleSsh = !windowsLocalPath
       && !repositoryUrl.includes("://")
       && !repositoryUrl.includes("::")
-      && /^[A-Za-z0-9._-]+:(?!:)[^\s]+$/.test(repositoryUrl);
+      && /^(?:git@)?[A-Za-z0-9.-]+:(?!:)[A-Za-z0-9_./-]+$/.test(repositoryUrl);
     let approvedRemote = scpStyleSsh;
     if (!approvedRemote) {
       try {
         const parsed = new URL(repositoryUrl);
-        if (parsed.username || parsed.password) {
+        if (parsed.password || (parsed.username && !(parsed.protocol === "ssh:" && parsed.username === "git"))) {
           throw new Error("repositoryUrl must not contain embedded credentials; configure Git credentials on Unity-Server instead.");
         }
         approvedRemote = parsed.protocol === "https:" || parsed.protocol === "ssh:";
@@ -1431,7 +1431,12 @@ function validateRepositoryUrl(
     }
   }
 
-  if (allowedPrefixes.length > 0 && !allowedPrefixes.some((prefix) => repositoryUrl.startsWith(prefix))) {
+  if (allowedPrefixes.length > 0 && !allowedPrefixes.some((prefix) => {
+    if (!repositoryUrl.startsWith(prefix)) return false;
+    const remainder = repositoryUrl.slice(prefix.length);
+    if (prefix.endsWith("/") || prefix.endsWith(":")) return true;
+    return remainder === "" || remainder === ".git" || remainder.startsWith("/");
+  })) {
     throw new Error(`Repository is not allowed by DEVSPACE_UNITY_ALLOWED_REPOSITORIES: ${repositoryUrl}`);
   }
 }

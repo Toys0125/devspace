@@ -23,7 +23,7 @@ the Unity worker and do not validate a mutable shared checkout.
    - the repository clone URL;
    - the exact hexadecimal commit SHA;
    - the appropriate validation profile;
-   - `projectPath` only when the repo config does not already specify it.
+   - `project_path` only when the repo config does not already specify it.
 6. Poll `get_unity_validation` until the job is terminal.
 7. On failure, use `read_unity_validation_log` for the failing step, repair the
    source in the original DevSpace workspace, create a new commit, and rerun.
@@ -31,8 +31,12 @@ the Unity worker and do not validate a mutable shared checkout.
    from the receipt with the current source SHA. Any source edit after the
    validated commit makes the receipt stale.
 
+Use snake_case for MCP tool arguments (`repository_url`, `project_path`, `config_path`,
+`job_id`, `validated_commit`). Project `.unity-validation.json` keys and the
+receipt fields retain their original camelCase format.
+
 Never submit a branch or tag as the validation identity. Validation results are
-only valid for the exact SHA returned in `validatedCommit`.
+only valid for the exact SHA returned in the receipt’s `validatedCommit` field.
 
 ## Profiles
 

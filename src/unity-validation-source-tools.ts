@@ -1,12 +1,12 @@
 import { access, readdir } from "node:fs/promises";
 import { relative } from "node:path";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpRegistrationTarget } from "./mcp-modern-server.js";
 import * as z from "zod/v4";
 import { git, getGitEligibility } from "./git.js";
 import { WorkspaceRegistry } from "./workspaces.js";
 
 export function registerUnityValidationSourceTools(
-  server: McpServer,
+  server: McpRegistrationTarget,
   workspaces: WorkspaceRegistry,
 ): void {
   server.registerTool(
@@ -16,13 +16,14 @@ export function registerUnityValidationSourceTools(
       description:
         "Inspect an open DevSpace Git workspace and return the immutable HEAD SHA, clone URL, dirty state, and detected Unity project paths needed to submit that exact source state to a separate Unity-Server validation worker. This tool does not push or modify Git state.",
       inputSchema: {
-        workspaceId: z.string().min(1).describe("Workspace identifier returned by open_workspace."),
+        workspace_id: z.string().min(1).describe("Workspace identifier returned by open_workspace."),
         remote: z.string().min(1).optional().describe("Git remote to use. Defaults to origin."),
       },
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    async ({ workspaceId, remote }) => {
-      const workspace = workspaces.getWorkspace(workspaceId);
+    async ({ workspace_id, remote }) => {
+      const workspaceId = workspace_id;
+      const workspace = await workspaces.getWorkspace(workspaceId);
       const eligibility = await getGitEligibility(workspace.root);
       if (!eligibility.ok || !eligibility.gitRoot) {
         throw new Error(eligibility.message ?? "Workspace is not an eligible Git repository.");
@@ -84,13 +85,15 @@ export function registerUnityValidationSourceTools(
       description:
         "Compare a Unity validation receipt's exact commit SHA with the current DevSpace workspace state. The receipt is current only when HEAD matches and the workspace has no uncommitted changes.",
       inputSchema: {
-        workspaceId: z.string().min(1).describe("Workspace identifier returned by open_workspace."),
-        validatedCommit: z.string().regex(/^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/).describe("Full exact SHA from the Unity validation receipt."),
+        workspace_id: z.string().min(1).describe("Workspace identifier returned by open_workspace."),
+        validated_commit: z.string().regex(/^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/).describe("Full exact SHA from the Unity validation receipt."),
       },
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    async ({ workspaceId, validatedCommit }) => {
-      const workspace = workspaces.getWorkspace(workspaceId);
+    async ({ workspace_id, validated_commit }) => {
+      const workspaceId = workspace_id;
+      const validatedCommit = validated_commit;
+      const workspace = await workspaces.getWorkspace(workspaceId);
       const eligibility = await getGitEligibility(workspace.root);
       if (!eligibility.ok || !eligibility.gitRoot) {
         throw new Error(eligibility.message ?? "Workspace is not an eligible Git repository.");
@@ -134,14 +137,14 @@ export function redactRemoteUrl(repositoryUrl: string): {
   const scpStyle = repositoryUrl.match(/^([^/@:\s]+)@([^:\s]+):(.+)$/);
   if (scpStyle) {
     return {
-      repositoryUrl: `${scpStyle[2]}:${scpStyle[3]}`,
-      credentialsRedacted: true,
+      repositoryUrl,
+      credentialsRedacted: false,
     };
   }
 
   try {
     const parsed = new URL(repositoryUrl);
-    if (parsed.username || parsed.password) {
+    if (parsed.password || (parsed.username && !(parsed.protocol === "ssh:" && parsed.username === "git"))) {
       parsed.username = "";
       parsed.password = "";
       return { repositoryUrl: parsed.toString(), credentialsRedacted: true };
